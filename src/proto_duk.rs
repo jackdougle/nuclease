@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::env;
 use std::fs::File;
 use std::io::{self, Read};
@@ -11,10 +12,8 @@ fn read_file_to_string(filename: &str) -> Result<String, io::Error> {
     Ok(contents)
 }
 
-fn load_seqs(path: &str, k: usize, set_type: bool) -> HashMap<String, String> {
+fn load_seqs(path: &str) -> HashMap<String, String> {
     let mut seqs: HashMap<String, String> = HashMap::new();
-
-    println!("Loading seqs from {}", set_type);
 
     let seq_set = match read_file_to_string(path) {
         Ok(s) => s,
@@ -36,86 +35,94 @@ fn load_seqs(path: &str, k: usize, set_type: bool) -> HashMap<String, String> {
     seqs
 }
 
-fn get_kmers(seqs: &HashMap<String, String>, k: usize, canonical: bool) -> HashMap<String, String> {
-    let mut kmers: HashMap<String, String> = HashMap::new();
+fn get_rev_comp(seq: &str) -> String {
+    let mut rev: String = String::new();
 
-    for (name, seq) in seqs.iter() {
-        let max: usize = seq.len().saturating_sub(k.try_into().unwrap()) + 1;
+    for c in seq.chars() {
+        rev.push(match c {  
+            'C' => 'G',
+            'G' => 'C',
+            'A' => 'T',
+            'T' => 'A',
+            _ => { println!("Invalid base detected: {}", c); c }
+        });
+    }
+
+    rev.chars().rev().collect()
+}
+
+fn get_ref_kmers(ref_seqs: &HashMap<String, String>, k: usize) -> HashSet<String> {
+    let mut ref_kmers: HashSet<String> = HashSet::new();
+
+    for (_name, seq) in ref_seqs {
+        let max = seq.len().saturating_sub(k.try_into().unwrap()) + 1;
+        
+        for x in 0..max {
+            let end = x + k;
+
+            let temp = seq[x..end].to_string();
+            let rev = get_rev_comp(&temp);
+
+            let canonical = std::cmp::min(temp, rev);
+
+            ref_kmers.insert(canonical);
+        }
+    }
+
+    ref_kmers
+}
+
+fn get_read_kmers(read_seqs: &HashMap<String, String>, k: usize) -> HashMap<String, Vec<String>> {
+    let mut read_kmers: HashMap<String, Vec<String>> = HashMap::new();
+
+    for (name, seq) in read_seqs {
+        let max = seq.len().saturating_sub(k.try_into().unwrap()) + 1;
 
         for x in 0..max {
-            println!("{}", x);
-            let end: usize = x.checked_add(k.try_into().unwrap()).unwrap_or(x);
-            let temp_seq = &seq[x..end];
-            kmers.insert(name.to_string(), temp_seq.to_string());
-            if canonical {
-                let rev = get_complement(temp_seq);
-                kmers.insert(name.to_string(), rev.clone());
-                if x == 50 {
-                    println!("Here!");
-                    println!("{}", rev);
-                    println!("{}", temp_seq);
-                }
+            let end = x + k;
+
+            let temp = seq[x..end].to_string();
+
+            read_kmers.entry(name.clone()).or_insert(Vec::new()).push(temp);
+        }
+    }
+
+    read_kmers
+}
+
+fn check_kmers(ref_kmers: &HashSet<String>, read_kmers: &HashMap<String, Vec<String>>) -> HashMap<String, Vec<String>> {
+    let mut sus_kmers: HashMap<String, Vec<String>> = HashMap::new();
+
+    for (name, read_set) in read_kmers {
+        for read in read_set {
+            let rev = get_rev_comp(read);
+            let canonical = std::cmp::min(read, &rev);
+
+            if ref_kmers.contains(canonical) {
+                sus_kmers.entry(name.clone()).or_insert(Vec::new()).push(read.to_string());
             }
         }
     }
 
-    kmers
-}
-
-// fn check_kmers<'a>(k: i32, tests: HashMap<&'a str, &'a str>) -> HashMap<&'a str, &'a str> {
-//     let mut sus: HashMap<&'a str, &'a str> = HashMap::new();
-
-//     for (name, seq) in tests {
-//         let max: usize = seq.len().saturating_sub(k.try_into().unwrap()) + 1;
-//         println!("{}", seq);
-
-//         for x in 0..max {
-//             let end: usize = x.checked_add(k.try_into().unwrap()).unwrap_or(x);
-//             let temp_seq = &seq[x..end];
-//             println!("start: {}, end: {}, {}-mer: {:?}", x, end, k, temp_seq);
-//         }
-//     }
-
-//     sus
-// }
-
-fn get_complement(seq: &str) -> String {
-    let mut rev: String = String::new();
-
-    for c in seq.chars() {
-        if c == 'C' {
-            rev.push('G');
-        } else if c == 'G' {
-            rev.push('C');
-        } else if c == 'A' {
-            rev.push('T');
-        } else if c == 'T' {
-            rev.push('A');
-        } else {
-            println!("Invalid base detected");
-        }
-    }
-
-    rev
+    sus_kmers
 }
 
 pub fn main() {
     let args: Vec<String> = env::args().collect();
     let k = args[1].parse::<usize>().unwrap();
 
-    let ref_seqs = load_seqs("input/refs.fasta", k, true);
+    let ref_filename = args[2].as_str();
+    let ref_seqs = load_seqs(ref_filename);
     println!("ref_seqs: {:?}", ref_seqs);
-    let test_seqs = load_seqs("input/tests.fastq", k, true);
-    println!("test_seqs: {:?}", test_seqs);
 
-    let ref_kmers = get_kmers(&ref_seqs, k, true);
-    let test_kmers = get_kmers(&test_seqs, k, false);
+    let read_filename = args[3].as_str();
+    let read_seqs = load_seqs(read_filename);
+    println!("read_seqs: {:?}", read_seqs);
 
-    // TODO: make function to get kmers from seqs
-    // TODO: make function to get complements of kmers
-    // TODO: make function to check sample kmers against refs
+    let ref_kmers = get_ref_kmers(&ref_seqs, k);
+    let read_kmers = get_read_kmers(&read_seqs, k);
 
-    //let sus: HashMap<&str, &str> = check_kmers(k, samples);
+    let sus_kmers = check_kmers(&ref_kmers, &read_kmers);
 
-    //let full_refs: HashMap<String, String> = get_complements(&refs);
+    println!("{}-mers found in reference database: {:?}", k, sus_kmers);
 }
