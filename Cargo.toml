@@ -1,8 +1,12 @@
 [package]
-name = "rustKD"
+name = "rust-duk"
 version = "0.1.0"
 edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 fastq = "0.6.0"
 rand = "0.9.1"
+needletail = "0.6.3"
+bincode = "1.3"
