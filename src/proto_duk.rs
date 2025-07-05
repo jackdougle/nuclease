@@ -144,7 +144,7 @@ fn load_reference_streaming(path: &str) -> Result<HashMap<String, String>, Box<d
         
         // Convert byte slices to strings (needletail provides data as &[u8])
         let id = String::from_utf8_lossy(record.id()).to_string();
-        let seq = String::from_utf8_lossy(record.seq()).to_string();
+        let seq = String::from_utf8_lossy(&record.seq()).to_string();
         
         ref_seqs.insert(id, seq);
     }
@@ -184,7 +184,7 @@ fn process_reads_streaming_efficient(
     
     while let Some(record) = reader.next() {
         let record = record?;
-        let seq = String::from_utf8_lossy(record.seq());
+        let seq = String::from_utf8_lossy(&record.seq()).to_string();
         
         // Extract k-mers from this single read
         let mut read_kmers = HashSet::new();
@@ -308,7 +308,7 @@ fn process_with_memory_limit(
     
     while let Some(record) = reader.next() {
         let record = record?;
-        let seq = String::from_utf8_lossy(record.seq()).to_string();
+        let seq = String::from_utf8_lossy(&record.seq()).to_string();
         
         // Estimate memory usage (rough calculation)
         let seq_memory = seq.len() * std::mem::size_of::<char>();
@@ -409,7 +409,7 @@ fn process_reads_parallel(
     let unmatched = Arc::new(Mutex::new(Vec::new()));
     
     // Create a shared queue for distributing reads to worker threads
-    let queue = Arc::new(Mutex::new(Vec::new()));
+    let queue: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let queue_clone = Arc::clone(&queue);
     
     // Spawn worker threads
@@ -460,7 +460,7 @@ fn process_reads_parallel(
     let mut reader = needletail::parse_fastx_file(reads_path)?;
     while let Some(record) = reader.next() {
         let record = record?;
-        let seq = String::from_utf8_lossy(record.seq()).to_string();
+        let seq = String::from_utf8_lossy(&record.seq()).to_string();
         queue_clone.lock().unwrap().push(seq);
     }
     
