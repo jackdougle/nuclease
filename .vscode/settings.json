@@ -1,0 +1,11 @@
+{
+    "java.compile.nullAnalysis.mode": "disabled",
+    "java.configuration.updateBuildConfiguration": "disabled",
+    "java.import.gradle.enabled": false,
+    "java.import.maven.enabled": false,
+    "files.exclude": {
+        "**/ref/**/*.java": false
+    },
+    "java.project.sourcePaths": [],
+    "java.project.referencedLibraries": []
+} 
