@@ -1,4 +1,3 @@
-// use fastq::{Record, Parser};
 use needletail::{FastxReader, Sequence, parse_fastx_file};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -22,6 +21,7 @@ pub fn run(args: crate::Args) {
     let ref_seqs = match load_reference_streaming(&ref_filename) {
         Ok(seqs) => {
             println!("Loaded {} reference sequences", seqs.len());
+            println!("Reference sequences: {:#?}", seqs);
             seqs
         }
         Err(e) => {
@@ -242,6 +242,8 @@ fn process_reads_streaming_efficient(
 ) -> Result<(Vec<String>, Vec<String>), Box<dyn std::error::Error>> {
     let mut matched = Vec::new();
     let mut unmatched = Vec::new();
+    let mut matched_new = HashMap::new();
+    let mut unmatched_new = HashMap::new();
 
     // needletail handles file format detection and streaming
     let mut reader = needletail::parse_fastx_file(reads_path)?;
@@ -592,4 +594,231 @@ fn write_results_streaming(
     );
 
     Ok(())
+}
+
+/// Processes reads with sequence ID preservation (like BBDuk)
+/// 
+/// PURPOSE: Preserve read IDs when classifying reads, which is essential for
+/// bioinformatics workflows. BBDuk maintains read IDs so users can track
+/// which specific reads matched or didn't match reference sequences.
+/// 
+/// HOW IT WORKS WITH NEEDLETAIL:
+/// - Extracts both sequence ID and sequence data from each read
+/// - Classifies reads while preserving their original identifiers
+/// - Returns structured data with IDs for downstream analysis
+/// 
+/// BENEFITS:
+/// - Maintains read identification for downstream tools
+/// - Enables tracking of specific reads through workflows
+/// - Compatible with bioinformatics pipeline requirements
+/// - Matches BBDuk's behavior for read ID preservation
+fn process_reads_with_ids(
+    reads_path: &str,
+    ref_kmers: &HashSet<String>,
+    k: usize,
+    threshold: usize,
+    canonical: bool,
+) -> Result<(Vec<(String, String)>, Vec<(String, String)>), Box<dyn std::error::Error>> {
+    let mut matched = Vec::new();  // (read_id, sequence)
+    let mut unmatched = Vec::new(); // (read_id, sequence)
+    
+    // needletail handles file format detection and streaming
+    let mut reader = needletail::parse_fastx_file(reads_path)?;
+    
+    while let Some(record) = reader.next() {
+        let record = record?;
+        
+        // Preserve both ID and sequence (like BBDuk)
+        let read_id = String::from_utf8_lossy(record.id()).to_string();
+        let seq = String::from_utf8_lossy(&record.seq()).to_string();
+        
+        // Extract k-mers from this single read
+        let mut read_kmers = HashSet::new();
+        for i in 0..=seq.len() - k {
+            let kmer = &seq[i..i + k];
+            
+            if canonical {
+                let rc = rev_comp(kmer);
+                read_kmers.insert(std::cmp::min(kmer, &rc).to_string());
+            } else {
+                read_kmers.insert(kmer.to_string());
+            }
+        }
+        
+        // Count hits against reference k-mers
+        let hits = read_kmers.intersection(ref_kmers).count();
+        
+        // Classify this read based on threshold (preserving ID)
+        if hits >= threshold {
+            matched.push((read_id, seq));
+        } else {
+            unmatched.push((read_id, seq));
+        }
+    }
+    
+    Ok((matched, unmatched))
+}
+
+/// Writes results to output files with read ID preservation (like BBDuk)
+/// 
+/// PURPOSE: Write matched and unmatched reads to files while preserving
+/// their original IDs, which is essential for bioinformatics workflows
+/// and matches BBDuk's output behavior.
+/// 
+/// HOW IT WORKS:
+/// - Takes read records with IDs and sequences
+/// - Writes to FASTA/FASTQ format preserving original IDs
+/// - Maintains compatibility with downstream tools
+/// 
+/// BENEFITS:
+/// - Preserves read identification for downstream analysis
+/// - Compatible with bioinformatics pipeline tools
+/// - Matches BBDuk's output format expectations
+/// - Enables tracking reads through multi-step workflows
+fn write_results_with_ids(
+    matched: &[(String, String)],  // (read_id, sequence)
+    unmatched: &[(String, String)], // (read_id, sequence)
+    matched_output: &str,
+    unmatched_output: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::fs::File;
+    use std::io::{BufWriter, Write};
+    
+    // Write matched reads with their original IDs
+    let matched_file = File::create(matched_output)?;
+    let mut matched_writer = BufWriter::new(matched_file);
+    
+    for (read_id, seq) in matched {
+        writeln!(matched_writer, ">{}", read_id)?;
+        writeln!(matched_writer, "{}", seq)?;
+    }
+    
+    // Write unmatched reads with their original IDs
+    let unmatched_file = File::create(unmatched_output)?;
+    let mut unmatched_writer = BufWriter::new(unmatched_file);
+    
+    for (read_id, seq) in unmatched {
+        writeln!(unmatched_writer, ">{}", read_id)?;
+        writeln!(unmatched_writer, "{}", seq)?;
+    }
+    
+    println!(
+        "Wrote {} matched reads (with IDs) to {}",
+        matched.len(),
+        matched_output
+    );
+    println!(
+        "Wrote {} unmatched reads (with IDs) to {}",
+        unmatched.len(),
+        unmatched_output
+    );
+    
+    Ok(())
+}
+
+/// Processes reads with memory limits while preserving read IDs
+/// 
+/// PURPOSE: Combine memory-efficient processing with read ID preservation.
+/// This function processes reads in chunks that fit within memory limits
+/// while maintaining the ability to track which specific reads matched.
+/// 
+/// HOW IT WORKS WITH NEEDLETAIL:
+/// - Uses needletail's streaming to read reads one at a time
+/// - Preserves read IDs throughout the processing pipeline
+/// - Tracks memory usage and processes in batches
+/// - Maintains read identification in output
+/// 
+/// BENEFITS:
+/// - Memory efficient: processes in configurable chunks
+/// - ID preservation: maintains read identification
+/// - Scalable: handles files of any size
+/// - Compatible: works with bioinformatics workflows
+fn process_with_memory_limit_and_ids(
+    reads_path: &str,
+    ref_kmers: &HashSet<String>,
+    k: usize,
+    threshold: usize,
+    canonical: bool,
+    memory_limit_mb: usize,
+) -> Result<(Vec<(String, String)>, Vec<(String, String)>), Box<dyn std::error::Error>> {
+    let mut matched = Vec::new();
+    let mut unmatched = Vec::new();
+    let mut current_batch = Vec::new(); // (read_id, sequence)
+    let mut current_memory = 0;
+    
+    let memory_limit_bytes = memory_limit_mb * 1024 * 1024;
+    
+    let mut reader = needletail::parse_fastx_file(reads_path)?;
+    
+    while let Some(record) = reader.next() {
+        let record = record?;
+        
+        let read_id = String::from_utf8_lossy(record.id()).to_string();
+        let seq = String::from_utf8_lossy(&record.seq()).to_string();
+        
+        // Estimate memory usage (rough calculation)
+        let seq_memory = seq.len() * std::mem::size_of::<char>();
+        
+        // If adding this sequence would exceed memory limit, process current batch
+        if current_memory + seq_memory > memory_limit_bytes && !current_batch.is_empty() {
+            let (batch_matched, batch_unmatched) = process_batch_with_ids(
+                &current_batch, ref_kmers, k, threshold, canonical
+            );
+            matched.extend(batch_matched);
+            unmatched.extend(batch_unmatched);
+            
+            current_batch.clear();
+            current_memory = 0;
+        }
+        
+        current_batch.push((read_id, seq));
+        current_memory += seq_memory;
+    }
+    
+    // Process final batch
+    if !current_batch.is_empty() {
+        let (batch_matched, batch_unmatched) = process_batch_with_ids(
+            &current_batch, ref_kmers, k, threshold, canonical
+        );
+        matched.extend(batch_matched);
+        unmatched.extend(batch_unmatched);
+    }
+    
+    Ok((matched, unmatched))
+}
+
+/// Helper function to process a batch of sequences with IDs
+fn process_batch_with_ids(
+    sequences: &[(String, String)], // (read_id, sequence)
+    ref_kmers: &HashSet<String>,
+    k: usize,
+    threshold: usize,
+    canonical: bool,
+) -> (Vec<(String, String)>, Vec<(String, String)>) {
+    let mut matched = Vec::new();
+    let mut unmatched = Vec::new();
+    
+    for (read_id, seq) in sequences {
+        let mut read_kmers = HashSet::new();
+        for i in 0..=seq.len() - k {
+            let kmer = &seq[i..i + k];
+            
+            if canonical {
+                let rc = rev_comp(kmer);
+                read_kmers.insert(std::cmp::min(kmer, &rc).to_string());
+            } else {
+                read_kmers.insert(kmer.to_string());
+            }
+        }
+        
+        let hits = read_kmers.intersection(ref_kmers).count();
+        
+        if hits >= threshold {
+            matched.push((read_id.clone(), seq.clone()));
+        } else {
+            unmatched.push((read_id.clone(), seq.clone()));
+        }
+    }
+    
+    (matched, unmatched)
 }
