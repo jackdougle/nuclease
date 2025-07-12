@@ -84,31 +84,7 @@ pub fn run(args: crate::Args) {
     }
 }
 
-fn mouge() {
-    let x = String::from("mouge");
-    println!("Y: {}", &x);
-    mouge2(&x);
-}
-
-fn mouge2(stringy: &String) {
-    println!("X: {}", stringy);
-}
-
 /// Loads k-mer index from disk for fast startup
-///
-/// PURPOSE: Load a previously saved k-mer index instead of rebuilding it.
-/// This dramatically reduces startup time and enables efficient parallel processing.
-///
-/// HOW IT WORKS:
-/// - Deserializes the binary k-mer index file
-/// - Restores the HashSet<String> in memory
-/// - Provides instant access to reference k-mers
-///
-/// BENEFITS:
-/// - Fast startup: no need to re-parse reference files
-/// - Memory efficient: only loads the k-mer set, not full sequences
-/// - Enables parallel workflows: multiple processes can share the same index
-/// - Supports your goal of efficient SIZ chunk processing
 fn load_kmer_index(path: &str) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
     use std::fs::File;
     use std::io::BufReader;
@@ -179,22 +155,7 @@ fn load_reference_streaming(
     Ok(ref_seqs)
 }
 
-/// Writes results to output files with read ID preservation (like BBDuk)
-///
-/// PURPOSE: Write matched and unmatched reads to files while preserving
-/// their original IDs, which is essential for bioinformatics workflows
-/// and matches BBDuk's output behavior.
-///
-/// HOW IT WORKS:
-/// - Takes read records with IDs and sequences
-/// - Writes to FASTA/FASTQ format preserving original IDs
-/// - Maintains compatibility with downstream tools
-///
-/// BENEFITS:
-/// - Preserves read identification for downstream analysis
-/// - Compatible with bioinformatics pipeline tools
-/// - Matches BBDuk's output format expectations
-/// - Enables tracking reads through multi-step workflows
+/// Writes results to output files
 fn write_results_with_ids(
     matched: &[(String, String)],   // (read_id, sequence)
     unmatched: &[(String, String)], // (read_id, sequence)
@@ -237,22 +198,6 @@ fn write_results_with_ids(
 }
 
 /// Processes reads in a streaming fashion without loading all reads into memory
-///
-/// PURPOSE: Handle large read files (billions of reads) by processing them
-/// one at a time, which is essential for your goal of processing large datasets
-/// that BBDuk struggles with.
-///
-/// HOW IT WORKS WITH NEEDLETAIL:
-/// - Streams reads one at a time from the input file
-/// - Extracts k-mers from each read individually
-/// - Compares against reference k-mers immediately
-/// - Outputs results without storing all reads in memory
-///
-/// BENEFITS:
-/// - Memory efficient: processes reads one at a time
-/// - Fast: needletail's optimized parsing
-/// - Scalable: can handle files of any size
-/// - Streaming output: can pipe results to other tools
 fn process_reads(
     reads_path: &str,
     ref_kmers: &HashSet<String>,
@@ -299,17 +244,6 @@ fn process_reads(
 }
 
 /// Saves k-mer index to disk for reuse across multiple runs
-///
-/// HOW IT WORKS:
-/// - Serializes the HashSet<String> to a binary format
-/// - Uses bincode for efficient serialization
-/// - Creates a reusable index file that can be shared across machines
-///
-/// BENEFITS:
-/// - Eliminates index rebuilding time
-/// - Enables parallel processing by sharing index files
-/// - Reduces startup time for repeated runs
-/// - Supports your goal of efficient multi-threading workflows
 fn save_kmer_index(kmers: &HashSet<String>, path: &str) -> Result<(), Box<dyn std::error::Error>> {
     use std::fs::File;
     use std::io::BufWriter;
