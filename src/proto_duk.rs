@@ -1,47 +1,81 @@
-use needletail::{FastxReader, Sequence, parse_fastx_file};
+extern crate bincode;
+extern crate needletail;
+
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::thread;
+// use std::sync::Arc;
+// use std::thread;
 
 pub fn run(args: crate::Args) {
     let k = args.k;
     let threshold = args.threshold;
     let canonical = args.canonical;
-    let ref_filename = &args.reference;
-    let read_filename = &args.reads;
+    let reference_filename = &args.reference;
+    let query_filename = &args.query;
+    // let matched_filename = &args.matched_path;
+    // let unmatched_filename = &args.unmatched_path;
+    let serialized_kmers_filename = &args.serialized_kmers_filename;
 
     println!(
         "k-mer size: {}\nthreshold: {}\ncanonical: {}\nreferences: {}\nqueries: {}",
-        k, threshold, canonical, ref_filename, read_filename
+        k, threshold, canonical, reference_filename, query_filename
     );
 
-    // Load reference sequences (can use streaming for large reference files)
-    let ref_seqs = match load_reference_streaming(&ref_filename) {
-        Ok(seqs) => {
-            println!("Loaded {} reference sequences", seqs.len());
-            println!("Reference sequences: {:#?}", seqs);
-            seqs
+    // Try to load pre-built k-mer index, or build it if it doesn't exist
+    let ref_kmers = match load_kmer_index(serialized_kmers_filename) {
+        Ok(kmers) => {
+            println!(
+                "Loaded {} k-mers from pre-built index file: {}",
+                kmers.len(),
+                serialized_kmers_filename
+            );
+            kmers
         }
-        Err(e) => {
-            eprintln!("Error loading reference sequences: {}", e);
-            std::process::exit(1);
+        Err(_) => {
+            println!("No pre-built index found, building from reference sequences...");
+
+            // Load reference sequences (can use streaming for large reference files)
+            let ref_seqs = match load_reference_streaming(&reference_filename) {
+                Ok(seqs) => {
+                    println!("Loaded {} reference sequences", seqs.len());
+                    println!("Reference sequences: {:#?}", seqs);
+                    seqs
+                }
+                Err(e) => {
+                    eprintln!("Error loading reference sequences: {}", e);
+                    std::process::exit(1);
+                }
+            };
+
+            // Extract reference k-mers
+            let kmers = get_reference_kmers(&ref_seqs, k, canonical);
+            println!("Extracted {} reference k-mers", kmers.len());
+
+            // Save for future use
+            if let Err(e) = save_kmer_index(&kmers, "reference_kmers.bin") {
+                eprintln!("Warning: Could not save k-mer index: {}", e);
+            } else {
+                println!("Saved k-mer index for future use");
+            }
+
+            kmers
         }
     };
 
-    // Extract reference k-mers
-    let ref_kmers = get_reference_kmers(&ref_seqs, k, canonical);
-    println!("Extracted {} reference k-mers", ref_kmers.len());
-
     // Process reads using streaming (much more memory efficient)
-    match process_reads_streaming_efficient(&read_filename, &ref_kmers, k, threshold, canonical) {
+    match process_reads(&query_filename, &ref_kmers, k, threshold, canonical) {
         Ok((matched, unmatched)) => {
             println!(
-                "Matched reads: {:#?} (threshold: {} k-mer hits)",
-                matched, threshold
+                "Matched reads: {} (threshold: {} k-mer hits)",
+                matched.len(),
+                threshold
             );
-            println!("Unmatched reads: {:#?}", unmatched);
-
-            // TODO: Add output file writing for matched and unmatched reads
+            println!("Unmatched reads: {}", unmatched.len());
+            let _ = write_results_with_ids(
+                &matched,
+                &unmatched,
+                "out/matched.fasta",
+                "out/unmatched.fasta",
+            );
         }
         Err(e) => {
             eprintln!("Error processing reads: {}", e);
@@ -75,7 +109,6 @@ fn load_kmer_index(path: &str) -> Result<HashSet<String>, Box<dyn std::error::Er
     // Deserialize k-mer set from binary format
     let kmers: HashSet<String> = bincode::deserialize_from(reader)?;
 
-    println!("Loaded {} k-mers from index file: {}", kmers.len(), path);
     Ok(kmers)
 }
 
@@ -210,13 +243,13 @@ fn write_results_with_ids(
 /// - Fast: needletail's optimized parsing
 /// - Scalable: can handle files of any size
 /// - Streaming output: can pipe results to other tools
-fn process_reads_streaming_efficient(
+fn process_reads(
     reads_path: &str,
     ref_kmers: &HashSet<String>,
     k: usize,
     threshold: usize,
     canonical: bool,
-) -> Result<(Vec<String>, Vec<String>), Box<dyn std::error::Error>> {
+) -> Result<(Vec<(String, String)>, Vec<(String, String)>), Box<dyn std::error::Error>> {
     let mut matched = Vec::new();
     let mut unmatched = Vec::new();
 
@@ -246,9 +279,9 @@ fn process_reads_streaming_efficient(
 
         // Classify this read based on threshold
         if hits >= threshold {
-            matched.push(format!("{}, {}", id, seq));
+            matched.push((id, seq));
         } else {
-            unmatched.push(format!("{}, {}", id, seq));
+            unmatched.push((id, seq));
         }
     }
 

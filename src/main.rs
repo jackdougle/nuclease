@@ -20,12 +20,20 @@ struct Args {
     canonical: bool,
 
     /// Reference file path
-    #[arg(short = 'f', long, default_value_t = String::from("input/refs.fa"))]
+    #[arg(short = 'f', long, default_value_t = String::from("in/references.fa"))]
     reference: String,
 
     /// Reads file path
-    #[arg(short, long, default_value_t = String::from("input/reads.fq"))]
-    reads: String,
+    #[arg(short, long, default_value_t = String::from("in/queries.fq"))]
+    query: String,
+
+    #[arg(short, long, default_value_t = String::from("in/reference_kmers.bin"))]
+    serialized_kmers_filename: String,
+    // #[arg(short, long, default_value_t = String::from("out/matched.fasta"))]
+    // matched_path: String,
+
+    // #[arg(short, long, default_value_t = String::from("out/unmatched.fasta"))]
+    // unmatched_path: String,
 }
 
 fn main() {
