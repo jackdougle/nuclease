@@ -1,6 +1,8 @@
 extern crate bincode;
 extern crate needletail;
 
+use crate::kmer::*;
+
 use std::collections::{HashMap, HashSet};
 // use std::sync::Arc;
 // use std::thread;
@@ -11,8 +13,10 @@ pub fn run(args: crate::Args) {
     let canonical = args.canonical;
     let reference_filename = &args.reference;
     let query_filename = &args.query;
-    // let matched_filename = &args.matched_path;
-    // let unmatched_filename = &args.unmatched_path;
+    let matched_filename = &args.matched_path;
+    println!("matched_filename: {}", matched_filename);
+    let unmatched_filename = &args.unmatched_path;
+    println!("unmatched_filename: {}", unmatched_filename);
     let serialized_kmers_filename = &args.serialized_kmers_filename;
 
     println!(
@@ -73,8 +77,8 @@ pub fn run(args: crate::Args) {
             let _ = write_results_with_ids(
                 &matched,
                 &unmatched,
-                "out/matched.fasta",
-                "out/unmatched.fasta",
+                matched_filename,
+                unmatched_filename,
             );
         }
         Err(e) => {
@@ -124,7 +128,8 @@ fn get_reference_kmers(
 
             if canonical_bool {
                 let rev = reverse_complement(&temp);
-                ref_kmers.insert(std::cmp::min(temp, rev));
+                let canon = if temp < rev { temp } else { rev };
+                ref_kmers.insert(canon);
             } else {
                 ref_kmers.insert(temp);
             }

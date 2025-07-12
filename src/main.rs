@@ -1,3 +1,4 @@
+mod kmer;
 mod proto_duk;
 // mod test;
 
@@ -29,11 +30,12 @@ struct Args {
 
     #[arg(short, long, default_value_t = String::from("in/reference_kmers.bin"))]
     serialized_kmers_filename: String,
-    // #[arg(short, long, default_value_t = String::from("out/matched.fasta"))]
-    // matched_path: String,
 
-    // #[arg(short, long, default_value_t = String::from("out/unmatched.fasta"))]
-    // unmatched_path: String,
+    #[arg(short, long, default_value_t = String::from("out/matched.fa"))]
+    matched_path: String,
+
+    #[arg(short, long, default_value_t = String::from("out/unmatched.fa"))]
+    unmatched_path: String,
 }
 
 fn main() {
