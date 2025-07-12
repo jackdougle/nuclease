@@ -51,7 +51,7 @@ pub fn run(args: crate::Args) {
             println!("Extracted {} reference k-mers", kmers.len());
 
             // Save for future use
-            if let Err(e) = save_kmer_index(&kmers, "reference_kmers.bin") {
+            if let Err(e) = save_kmer_index(&kmers, "in/ref_kmers.bin") {
                 eprintln!("Warning: Could not save k-mer index: {}", e);
             } else {
                 println!("Saved k-mer index for future use");
@@ -82,6 +82,16 @@ pub fn run(args: crate::Args) {
             std::process::exit(1);
         }
     }
+}
+
+fn mouge() {
+    let x = String::from("mouge");
+    println!("Y: {}", &x);
+    mouge2(&x);
+}
+
+fn mouge2(stringy: &String) {
+    println!("X: {}", stringy);
 }
 
 /// Loads k-mer index from disk for fast startup
