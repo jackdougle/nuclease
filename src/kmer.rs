@@ -1,14 +1,19 @@
+pub fn canonical_kmer(seq: &str) -> String {
+    let rc: String = seq
+        .chars()
+        .rev()
+        .map(|c| match c {
+            'A' => 'T',
+            'T' => 'A',
+            'C' => 'G',
+            'G' => 'C',
+            _ => 'N',
+        })
+        .collect();
 
-pub fn reverse_complement(kmer: &[u8]) -> Vec<u8> {
-    let mut rev_kmer = Vec::new();
-    for &base in kmer.iter().rev() {
-        rev_kmer.push(match base {
-            0 => 3,
-            1 => 2,
-            2 => 1,
-            3 => 0,
-            _ => panic!("Invalid base: {}", base),
-        });
+    if rc.as_str() < seq {
+        rc
+    } else {
+        seq.to_string()
     }
-    rev_kmer
 }

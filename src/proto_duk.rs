@@ -1,11 +1,10 @@
 extern crate bincode;
 extern crate needletail;
 
-use crate::kmer::*;
+use crate::kmer::canonical_kmer;
 
+//use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
-// use std::sync::Arc;
-// use std::thread;
 
 pub fn run(args: crate::Args) {
     let k = args.k;
@@ -25,7 +24,7 @@ pub fn run(args: crate::Args) {
     );
 
     // Try to load pre-built k-mer index, or build it if it doesn't exist
-    let ref_kmers = match load_kmer_index(serialized_kmers_filename) {
+    let ref_kmers = match load_kmer_index(serialized_kmers_filename, k) {
         Ok(kmers) => {
             println!(
                 "Loaded {} k-mers from pre-built index file: {}",
@@ -38,7 +37,7 @@ pub fn run(args: crate::Args) {
             println!("No pre-built index found, building from reference sequences...");
 
             // Load reference sequences (can use streaming for large reference files)
-            let ref_seqs = match load_reference_streaming(&reference_filename) {
+            let ref_seqs = match load_reference_streaming(reference_filename) {
                 Ok(seqs) => {
                     println!("Loaded {} reference sequences", seqs.len());
                     println!("Reference sequences: {:#?}", seqs);
@@ -55,7 +54,7 @@ pub fn run(args: crate::Args) {
             println!("Extracted {} reference k-mers", kmers.len());
 
             // Save for future use
-            if let Err(e) = save_kmer_index(&kmers, "in/ref_kmers.bin") {
+            if let Err(e) = save_kmer_index(&kmers, serialized_kmers_filename) {
                 eprintln!("Warning: Could not save k-mer index: {}", e);
             } else {
                 println!("Saved k-mer index for future use");
@@ -74,12 +73,8 @@ pub fn run(args: crate::Args) {
                 threshold
             );
             println!("Unmatched reads: {}", unmatched.len());
-            let _ = write_results_with_ids(
-                &matched,
-                &unmatched,
-                matched_filename,
-                unmatched_filename,
-            );
+            let _ =
+                write_results_with_ids(&matched, &unmatched, matched_filename, unmatched_filename);
         }
         Err(e) => {
             eprintln!("Error processing reads: {}", e);
@@ -89,36 +84,32 @@ pub fn run(args: crate::Args) {
 }
 
 /// Loads k-mer index from disk for fast startup
-fn load_kmer_index(path: &str) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
+fn load_kmer_index(path: &str, k: usize) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
     use std::fs::File;
     use std::io::BufReader;
 
     let file = File::open(path)?;
-    let reader = BufReader::new(file);
+    let mut reader = BufReader::new(file);
 
     // Deserialize k-mer set from binary format
-    let kmers: HashSet<String> = bincode::deserialize_from(reader)?;
+    let kmers: HashSet<String> =
+        bincode::decode_from_std_read(&mut reader, bincode::config::standard())?;
+    if kmers.iter().next().unwrap().len() != k {
+        println!(
+            "k-mer size mismatch: {} != {}, reference binary file invalid",
+            kmers.iter().next().unwrap().len(),
+            k
+        );
+        std::process::exit(1);
+    }
 
     Ok(kmers)
-}
-
-fn reverse_complement(seq: &str) -> String {
-    seq.chars()
-        .rev()
-        .map(|c| match c {
-            'A' => 'T',
-            'T' => 'A',
-            'C' => 'G',
-            'G' => 'C',
-            _ => 'N',
-        })
-        .collect()
 }
 
 fn get_reference_kmers(
     ref_seqs: &HashMap<String, String>,
     k: usize,
-    canonical_bool: bool,
+    canonical: bool,
 ) -> HashSet<String> {
     let mut ref_kmers: HashSet<String> = HashSet::new();
 
@@ -126,10 +117,8 @@ fn get_reference_kmers(
         for x in 0..=seq.len() - k {
             let temp = seq[x..x + k].to_string();
 
-            if canonical_bool {
-                let rev = reverse_complement(&temp);
-                let canon = if temp < rev { temp } else { rev };
-                ref_kmers.insert(canon);
+            if canonical {
+                ref_kmers.insert(canonical_kmer(&temp));
             } else {
                 ref_kmers.insert(temp);
             }
@@ -227,8 +216,7 @@ fn process_reads(
             let kmer = &seq[i..i + k];
 
             if canonical {
-                let rc = reverse_complement(kmer);
-                read_kmers.insert(std::cmp::min(kmer, &rc).to_string());
+                read_kmers.insert(canonical_kmer(kmer));
             } else {
                 read_kmers.insert(kmer.to_string());
             }
@@ -254,10 +242,10 @@ fn save_kmer_index(kmers: &HashSet<String>, path: &str) -> Result<(), Box<dyn st
     use std::io::BufWriter;
 
     let file = File::create(path)?;
-    let writer = BufWriter::new(file);
+    let mut writer = BufWriter::new(file);
 
     // Serialize k-mer set to binary format
-    bincode::serialize_into(writer, kmers)?;
+    bincode::encode_into_std_write(kmers, &mut writer, bincode::config::standard())?;
 
     println!("Saved {} k-mers to index file: {}", kmers.len(), path);
     Ok(())
