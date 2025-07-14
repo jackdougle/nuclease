@@ -6,8 +6,9 @@ edition = "2024"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bio = "2.3.0"
-needletail = "0.6.3"
 bincode = "2.0.1"
+bio = "2.3.0"
 clap = { version = "4.5.41", features = ["derive"] }
+indicatif = "0.18.0"
+needletail = "0.6.3"
 rayon = "1.10.0"

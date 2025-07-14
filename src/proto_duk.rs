@@ -3,7 +3,16 @@ extern crate needletail;
 
 use crate::kmer::canonical_kmer;
 
-//use rayon::prelude::*;
+// TODO:
+// - Add a progress bar
+// - Add a way to specify the number of threads to use
+// - Add a way to specify the number of reads to process
+// - Add a way to specify the number of k-mers to process
+// - Add a way to specify the number of reference sequences to process
+// - Add a way to specify the number of query sequences to process
+
+use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 pub fn run(args: crate::Args) {
