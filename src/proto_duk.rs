@@ -1,9 +1,15 @@
 extern crate bincode;
+extern crate indicatif;
 extern crate needletail;
+extern crate rayon;
 
 use crate::kmer::canonical_kmer;
 
 // TODO:
+// - Add tests for program speed and memory usage
+// - Replace slow logic using Strings and Vecs with faster logic using Bytes and BytesMut
+// - Migrate repeated k-mer logic to more efficient logic in kmers.rs
+// - Replace Vecs with Arc<[T]> for thread-safe access to Vec<T>
 // - Add a progress bar
 // - Add a way to specify the number of threads to use
 // - Add a way to specify the number of reads to process
@@ -14,6 +20,7 @@ use crate::kmer::canonical_kmer;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 
 pub fn run(args: crate::Args) {
     let k = args.k;
