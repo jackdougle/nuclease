@@ -29,11 +29,11 @@ pub fn run(args: crate::Args) {
     let reference_filename = &args.reference;
     let query_filename = &args.query;
     let matched_filename = &args.matched_path;
-    println!("matched_filename: {}", matched_filename);
     let unmatched_filename = &args.unmatched_path;
-    println!("unmatched_filename: {}", unmatched_filename);
     let serialized_kmers_filename = &args.serialized_kmers_filename;
 
+    println!("matched_filename: {}", matched_filename);
+    println!("unmatched_filename: {}", unmatched_filename);
     println!(
         "k-mer size: {}\nthreshold: {}\ncanonical: {}\nreferences: {}\nqueries: {}",
         k, threshold, canonical, reference_filename, query_filename
