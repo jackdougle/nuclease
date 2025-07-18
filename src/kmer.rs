@@ -26,31 +26,32 @@ pub fn canonical_kmer(kmer: &str) -> String {
 
 // Extract all k-mers from a sequence. Canonicalizes if requested.
 // Skips over non-ACGT kmers (if they contain N or other symbols).
-// pub fn extract_kmers(seq: &[u8], k: usize, canonical: bool) -> HashSet<Vec<u8>> {
-//     let mut kmers = HashSet::new();
+pub fn extract_kmers(seq: &[u8], k: usize, canonical: bool) -> HashSet<Vec<u8>> {
+    let mut kmers = HashSet::new();
 
-//     if seq.len() < k {
-//         return kmers;
-//     }
+    if seq.len() < k {
+        return kmers;
+    }
 
-//     for i in 0..=(seq.len() - k) {
-//         let window = &seq[i..i + k];
+    for i in 0..=(seq.len() - k) {
+        let window = &seq[i..i + k];
 
-//         if window
-//             .iter()
-//             .any(|&b| !matches!(b, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't'))
-//         {
-//             continue; // skip kmers with ambiguous bases
-//         }
+        if window
+            .iter()
+            .any(|&b| !matches!(b, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't'))
+        {
+            continue; // skip kmers with ambiguous bases
+        }
 
-//         let kmer = if canonical {
-//             canonical_kmer(window)
-//         } else {
-//             window.to_ascii_uppercase()
-//         };
+        let kmer = if canonical {
+            let temp = String::from_utf8(window.to_ascii_uppercase()).unwrap();
+            canonical_kmer(&temp).as_bytes().to_vec()
+        } else {
+            window.to_ascii_uppercase()
+        };
 
-//         kmers.insert(kmer);
-//     }
+        kmers.insert(kmer);
+    }
 
-//     kmers
-// }
+    kmers
+}

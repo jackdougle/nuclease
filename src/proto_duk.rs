@@ -53,7 +53,7 @@ pub fn run(args: crate::Args) {
             println!("No pre-built index found, building from reference sequences...");
 
             // Load reference sequences (can use streaming for large reference files)
-            let ref_seqs = match load_reference_streaming(reference_filename) {
+            let ref_seqs = match load_reference_sequences(reference_filename) {
                 Ok(seqs) => {
                     println!("Loaded {} reference sequences", seqs.len());
                     println!("Reference sequences: {:#?}", seqs);
@@ -123,7 +123,7 @@ fn load_kmer_index(path: &str, k: usize) -> Result<HashSet<String>, Box<dyn std:
 }
 
 fn get_reference_kmers(
-    ref_seqs: &HashMap<String, String>,
+    ref_seqs: &HashMap<Arc<str>, Arc<str>>,
     k: usize,
     canonical: bool,
 ) -> HashSet<String> {
@@ -144,10 +144,10 @@ fn get_reference_kmers(
     ref_kmers
 }
 
-fn load_reference_streaming(
+fn load_reference_sequences(
     path: &str,
-) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
-    let mut ref_seqs: HashMap<String, String> = HashMap::new();
+) -> Result<HashMap<Arc<str>, Arc<str>>, Box<dyn std::error::Error>> {
+    let mut ref_seqs: HashMap<Arc<str>, Arc<str>> = HashMap::new();
 
     // needletail automatically detects file format (FASTA/FASTQ) and handles compression
     let mut reader = needletail::parse_fastx_file(path)?;
@@ -156,10 +156,11 @@ fn load_reference_streaming(
         let record = record?;
 
         // Convert byte slices to strings (needletail provides data as &[u8])
-        let id = String::from_utf8_lossy(record.id()).to_string();
-        let seq = String::from_utf8_lossy(&record.seq()).to_string();
+        let id = std::str::from_utf8(record.id()).unwrap();
+        let seq = String::from_utf8(record.seq().to_vec()).unwrap();
 
-        ref_seqs.insert(id, seq);
+
+        ref_seqs.insert(Arc::from(id), Arc::from(seq.as_str()));
     }
 
     Ok(ref_seqs)
