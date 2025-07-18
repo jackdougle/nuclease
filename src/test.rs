@@ -229,7 +229,7 @@ fn process_reads_parallel(
     threshold: usize,
     canonical: bool,
     num_threads: usize,
-) -> Result<(Vec<String>, Vec<String>), Box<dyn std::error::Error>> {
+) -> Result<(Vec<String>, Vec<Sxwtring>), Box<dyn std::error::Error>> {
     use std::sync::{Arc, Mutex};
     use std::thread;
 

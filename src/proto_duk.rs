@@ -159,7 +159,6 @@ fn load_reference_sequences(
         let id = std::str::from_utf8(record.id()).unwrap();
         let seq = String::from_utf8(record.seq().to_vec()).unwrap();
 
-
         ref_seqs.insert(Arc::from(id), Arc::from(seq.as_str()));
     }
 

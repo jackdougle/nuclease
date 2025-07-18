@@ -21,11 +21,11 @@ struct Args {
     canonical: bool,
 
     /// Reference file path
-    #[arg(short = 'f', long, default_value_t = String::from("in/references.fa"))]
+    #[arg(short, long, default_value_t = String::from("in/references.fa"))]
     reference: String,
 
     /// Reads file path
-    #[arg(short, long, default_value_t = String::from("in/queries.fq"))]
+    #[arg(short, long, default_value_t = String::from("in/100k_150.fq"))]
     query: String,
 
     #[arg(short, long, default_value_t = String::from("in/reference_kmers.bin"))]

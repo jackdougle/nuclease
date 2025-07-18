@@ -1,4 +1,52 @@
 use std::collections::HashSet;
+use std::sync::Arc;
+
+pub struct IdKmer {
+    pub id: Arc<str>,
+    pub sequence: [u8; 21], // Fixed size for k=21],
+}
+
+impl IdKmer {
+    pub fn new(id: &str, sequence: [u8; 21]) -> Self {
+        IdKmer {
+            id: Arc::from(id),
+            sequence,
+        }
+    }
+}
+
+pub struct Kmer {
+    pub encoded_seq: u64, // encoded using below definitions: 00011011 = ACGT
+}
+
+impl Kmer {
+    pub fn new(sequence: [u8; 21]) -> Self {
+        Kmer {
+            encoded_seq: sequence.iter().fold(0, |acc, &base| {
+                (acc << 2)
+                    | match base {
+                        b'A' => 0b00,
+                        b'C' => 0b01,
+                        b'G' => 0b10,
+                        b'T' => 0b11,
+                        _ => panic!("Invalid nucleotide base"),
+                    }
+            }),
+        }
+    }
+
+    pub fn size_of(&self) -> usize {
+        std::mem::size_of::<Self>() * 8 // size in bits
+    }
+}
+
+#[test]
+fn test_kmer_creation() {
+    let test_vec = b"ATGCTGTACGTAGCTCGATCA"; // 21 A's
+    let kmer = Kmer::new(test_vec[..21].try_into().unwrap());
+    println!("Encoded k-mer: {:042b}", kmer.encoded_seq);
+    assert_eq!(kmer.size_of(), 64); // 64 bits for u64
+}
 
 /// Return the reverse complement of a nucleotide sequence (A, C, G, T only).
 pub fn reverse_complement(seq: &str) -> String {
