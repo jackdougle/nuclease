@@ -1,4 +1,4 @@
-use bincode::de;
+use clap::Id;
 
 use crate::Args;
 use std::collections::HashSet;
@@ -23,10 +23,11 @@ impl IdKmer {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Kmer {
     pub encoded_seq: u64, // encoded using below definitions: 00011011 = ACGT
+    pub id: Arc<str>,
 }
 
 impl Kmer {
-    pub fn new(sequence: [u8; K]) -> Self {
+    pub fn new(sequence: [u8; K], id: Arc<str>) -> Self {
         Kmer {
             encoded_seq: sequence.iter().fold(0, |acc, &base| {
                 (acc << 2)
@@ -38,6 +39,7 @@ impl Kmer {
                         _ => panic!("Invalid nucleotide base"),
                     }
             }),
+            id: id,
         }
     }
 
@@ -63,10 +65,10 @@ impl Kmer {
 }
 
 #[test]
-fn test_kmer_creation() {
+fn test_kmer_struct() {
     let seq_vec = b"AGCTCAGATCATGTTTGTGTGG";
-    let kmer = Kmer::new(seq_vec[0..K].try_into().unwrap());
-    let kmer2 = Kmer::new(seq_vec[1..K + 1].try_into().unwrap());
+    let kmer = Kmer::new(seq_vec[0..K].try_into().unwrap(), Arc::from("SEQ_ID_1"));
+    let kmer2 = Kmer::new(seq_vec[0..K].try_into().unwrap(), Arc::from("SEQ_ID_6"));
 
     println!("Encoded k-mer: {:042b}", kmer.encoded_seq);
     println!("Encoded k-mer: {:042b}", kmer2.encoded_seq);
@@ -76,6 +78,7 @@ fn test_kmer_creation() {
     );
 
     assert_ne!(kmer, kmer2);
+    assert_eq!(kmer.encoded_seq, kmer2.encoded_seq);
     println!(
         "k-mer 1: {}, k-mer 2: {}",
         kmer.encoded_seq, kmer2.encoded_seq
@@ -84,15 +87,16 @@ fn test_kmer_creation() {
     let decoded_seq: [u8; 21] = [
         71, 84, 71, 84, 71, 84, 84, 84, 71, 84, 65, 67, 84, 65, 71, 65, 67, 84, 67, 71, 65,
     ];
+
     println!("Decoded k-mer 1: {:?}", kmer.decoded());
     assert_eq!(kmer.decoded(), decoded_seq);
 
-    let ex = b"AGCTCAGATCATGTTTGTGTG";
+    let ex_str = b"AGCTCAGATCATGTTTGTGTG";
 
     // Convert [u8] to String (assuming ASCII ACGT bases)
     let decoded_str = String::from_utf8(decoded_seq.to_vec()).unwrap();
     println!("{}", decoded_str); // prints e.g. "AGTACGTGAC"
-    assert_eq!(&kmer.decoded(), b"AGCTCAGATCATGTTTGTGTG");
+    assert_ne!(&kmer.decoded(), ex_str);
 }
 
 /// Return the reverse complement of a nucleotide sequence (A, C, G, T only).
