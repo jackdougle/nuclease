@@ -3,7 +3,8 @@ extern crate indicatif;
 extern crate needletail;
 extern crate rayon;
 
-use crate::kmer::canonical_kmer;
+use crate::kmer_processor::*;
+use crate::kmer::*;
 
 // TODO:
 // - Add tests for program speed and memory usage

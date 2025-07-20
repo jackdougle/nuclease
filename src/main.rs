@@ -1,5 +1,6 @@
 mod kmer;
-mod proto_duk;
+mod kmer_processor;
+mod cuttlefish;
 // mod test;
 
 use clap::Parser;
@@ -40,5 +41,5 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    proto_duk::run(args);
+    cuttlefish::run(args);
 }

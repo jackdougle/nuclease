@@ -368,3 +368,43 @@ fn process_with_memory_limit(
 
     Ok((matched, unmatched))
 }
+
+pub struct KmerProcessor {
+    pub current_kmer: u64,
+    pub k: usize,
+    pub kmers: HashSet<Kmer>,
+}
+
+impl KmerProcessor {
+    pub fn new(k: usize) -> Self {
+        KmerProcessor {
+            current_kmer: 0,
+            k,
+            kmers: HashSet::new(),
+        }
+    }
+
+    pub fn process(&mut self, seq: &[u8], id: Arc<str>) {
+        if seq.len() < self.k {
+            return; // Not enough bases for a k-mer
+        }
+
+        for i in 0..=(seq.len() - self.k) {
+            let window = &seq[i..i + self.k];
+            let kmer = Kmer::new(window.try_into().unwrap(), id.clone());
+            self.kmers.insert(kmer);
+        }
+    }
+
+    pub fn rolling_hash(&mut self, base: u8) {
+        // Shift current k-mer left by 2 bits and add new base
+        self.current_kmer = ((self.current_kmer << 2) & ((1 << (self.k * 2)) - 1))
+            | match base {
+                b'A' => 0b00,
+                b'C' => 0b01,
+                b'G' => 0b10,
+                b'T' => 0b11,
+                _ => panic!("Invalid nucleotide base"),
+            };
+    }
+}
