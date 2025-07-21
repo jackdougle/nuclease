@@ -1,6 +1,6 @@
+mod cuttlefish;
 mod kmer;
 mod kmer_processor;
-mod cuttlefish;
 // mod test;
 
 use clap::Parser;
@@ -15,7 +15,7 @@ struct Args {
 
     /// Threshold for k-mer matches
     #[arg(short, long, default_value_t = 3)]
-    threshold: usize,
+    threshold: u8,
 
     /// Use canonical k-mers
     #[arg(short, long, default_value_t = true)]

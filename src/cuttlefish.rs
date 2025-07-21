@@ -3,10 +3,11 @@ extern crate indicatif;
 extern crate needletail;
 extern crate rayon;
 
-use crate::kmer_processor::*;
 use crate::kmer::*;
+use crate::kmer_processor::*;
 
 // TODO:
+// - Refactor everything in this file with KmerProcessor struct and methods
 // - Add tests for program speed and memory usage
 // - Replace slow logic using Strings and Vecs with faster logic using Bytes and BytesMut
 // - Migrate repeated k-mer logic to more efficient logic in kmers.rs
@@ -32,6 +33,8 @@ pub fn run(args: crate::Args) {
     let matched_filename = &args.matched_path;
     let unmatched_filename = &args.unmatched_path;
     let serialized_kmers_filename = &args.serialized_kmers_filename;
+
+    let kmer_processor = KmerProcessor::new(k, threshold);
 
     println!("matched_filename: {}", matched_filename);
     println!("unmatched_filename: {}", unmatched_filename);
@@ -132,7 +135,7 @@ fn get_reference_kmers(
 
     for (_name, seq) in ref_seqs {
         for x in 0..=seq.len() - k {
-            let temp = seq[x..x + k].to_string();
+            let temp = encode(seq[x..x + k].as_bytes());
 
             if canonical {
                 ref_kmers.insert(canonical_kmer(&temp));

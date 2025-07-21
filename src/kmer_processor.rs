@@ -1,45 +1,46 @@
-use std::collections::HashSet;
-use std::sync::Arc;
-use ahash::AHashMap;
-use std::hash::BuildHasherDefault;
 use crate::kmer::*;
+use ahash::AHashMap;
+use needletail::bitkmer::canonical;
+use std::collections::HashSet;
+use std::hash::BuildHasherDefault;
+use std::sync::Arc;
 
 pub struct KmerProcessor {
     pub k: usize,
-    pub current_kmers: HashSet<Kmer>,
-    pub current_kmer: u64,
-    pub threshold: usize,
-    pub canonical: bool,
+    pub threshold: u8,
+    pub ref_kmers: HashSet<u64>,
 }
 
 impl KmerProcessor {
-    pub fn new(k: usize, threshold: usize, canonical: bool) -> Self {
+    pub fn new(k: usize, threshold: u8) -> Self {
         KmerProcessor {
             k,
-            current_kmers: HashSet::new(),
-            current_kmer: 0,
             threshold,
-            canonical,
+            ref_kmers: HashSet::new(),
         }
     }
 
-    pub fn process_read(&mut self, read: &str) -> Result<(), String> {
-        if read.len() < self.k {
-            return Err("Read is shorter than k".to_string());
+    pub fn process_ref(&mut self, ref_seq: &str) {
+        if ref_seq.len() < self.k {
+            panic!("Read sequence is shorter than k");
         }
 
-        for i in 0..=read.len() - self.k {
-            let kmer_seq = &read[i..i + self.k];
-            let kmer = Kmer::new(kmer_seq.as_bytes().try_into().unwrap(), Arc::from(""));
+        for i in 0..=ref_seq.len() - self.k {}
+    }
 
-            if self.canonical {
-                let canonical_kmer = canonical_kmer(kmer_seq);
-                self.current_kmers.insert(Kmer::new(canonical_kmer.as_bytes().try_into().unwrap(), Arc::from("")));
-            } else {
-                self.current_kmers.insert(kmer);
+    pub fn process_read(&mut self, read_seq: &str) -> bool {
+        if read_seq.len() < self.k {
+            panic!("Reference sequence is shorter than k")
+        }
+
+        let mut count: u8 = 0;
+        for i in 0..=read_seq.len() - self.k {
+            let kmer = encode(&read_seq[i..i + self.k].as_bytes());
+            let canonical = canonical_kmer(kmer);
+            if self.ref_kmers.contains(&canonical) {
+                count += 1
             }
         }
-
-        Ok(())
+        if count >= self.threshold { true } else { false }
     }
 }
