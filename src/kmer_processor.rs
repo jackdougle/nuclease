@@ -1,5 +1,5 @@
 use crate::kmer::*;
-use ahash::AHashMap;
+use ahash::AHashSet;
 use needletail::bitkmer::canonical;
 use std::collections::HashSet;
 use std::hash::BuildHasherDefault;
@@ -8,7 +8,7 @@ use std::sync::Arc;
 pub struct KmerProcessor {
     pub k: usize,
     pub threshold: u8,
-    pub ref_kmers: HashSet<u64>,
+    pub ref_kmers: AHashSet<u64>,
 }
 
 impl KmerProcessor {
@@ -16,7 +16,7 @@ impl KmerProcessor {
         KmerProcessor {
             k,
             threshold,
-            ref_kmers: HashSet::new(),
+            ref_kmers: AHashSet::new(),
         }
     }
 
@@ -36,7 +36,7 @@ impl KmerProcessor {
         let mut count: u8 = 0;
         for i in 0..=read_seq.len() - self.k {
             let kmer = encode(&read_seq[i..i + self.k].as_bytes());
-            let canonical = canonical_kmer(kmer);
+            let canonical = canonical_kmer(kmer, self.k);
             if self.ref_kmers.contains(&canonical) {
                 count += 1
             }

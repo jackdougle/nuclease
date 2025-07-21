@@ -19,10 +19,10 @@ use crate::kmer_processor::*;
 // - Add a way to specify the number of reference sequences to process
 // - Add a way to specify the number of query sequences to process
 
-use indicatif::{ProgressBar, ProgressStyle};
+use ahash::AHashSet;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 pub fn run(args: crate::Args) {
     let k = args.k;
@@ -70,22 +70,25 @@ pub fn run(args: crate::Args) {
             };
 
             // Extract reference k-mers
-            let kmers = get_reference_kmers(&ref_seqs, k, canonical);
-            println!("Extracted {} reference k-mers", kmers.len());
+            get_reference_kmers(ref_seqs, &kmer_processor);
+            println!(
+                "Extracted {} reference k-mers",
+                kmer_processor.ref_kmers.len()
+            );
 
             // Save for future use
-            if let Err(e) = save_kmer_index(&kmers, serialized_kmers_filename) {
+            if let Err(e) = save_kmer_index(kmer_processor.ref_kmers, serialized_kmers_filename) {
                 eprintln!("Warning: Could not save k-mer index: {}", e);
             } else {
                 println!("Saved k-mer index for future use");
             }
 
-            kmers
+            ref_seqs
         }
     };
 
     // Process reads using streaming (much more memory efficient)
-    match process_reads(&query_filename, &ref_kmers, k, threshold, canonical) {
+    match process_reads(&query_filename, kmer_processor, k, threshold, canonical) {
         Ok((matched, unmatched)) => {
             println!(
                 "Matched reads: {} (threshold: {} k-mer hits)",
@@ -104,54 +107,47 @@ pub fn run(args: crate::Args) {
 }
 
 /// Loads k-mer index from disk for fast startup
-fn load_kmer_index(path: &str, k: usize) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
+fn load_kmer_index(path: &str, k: usize) -> Result<AHashSet<Arc<str>>, Box<dyn std::error::Error>> {
     use std::fs::File;
     use std::io::BufReader;
 
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
 
-    // Deserialize k-mer set from binary format
-    let kmers: HashSet<String> =
+    // Deserialize k-mer set from binary format as Vec<String>
+    let kmers_vec: Vec<String> =
         bincode::decode_from_std_read(&mut reader, bincode::config::standard())?;
-    if kmers.iter().next().unwrap().len() != k {
+    if kmers_vec.first().map(|s| s.len()).unwrap_or(0) != k {
         println!(
             "k-mer size mismatch: {} != {}, reference binary file invalid",
-            kmers.iter().next().unwrap().len(),
+            kmers_vec.first().map(|s| s.len()).unwrap_or(0),
             k
         );
         std::process::exit(1);
     }
 
+    // Convert Vec<String> to AHashSet<Arc<str>>
+    let kmers: AHashSet<Arc<str>> = kmers_vec
+        .into_iter()
+        .map(|s| Arc::from(s.as_str()))
+        .collect();
+
     Ok(kmers)
 }
 
-fn get_reference_kmers(
-    ref_seqs: &HashMap<Arc<str>, Arc<str>>,
-    k: usize,
-    canonical: bool,
-) -> HashSet<String> {
-    let mut ref_kmers: HashSet<String> = HashSet::new();
-
-    for (_name, seq) in ref_seqs {
-        for x in 0..=seq.len() - k {
-            let temp = encode(seq[x..x + k].as_bytes());
-
-            if canonical {
-                ref_kmers.insert(canonical_kmer(&temp));
-            } else {
-                ref_kmers.insert(temp);
-            }
+fn get_reference_kmers(ref_seqs: AHashSet<Arc<str>>, processor: &mut KmerProcessor) {
+    for seq in ref_seqs {
+        for x in 0..=seq.len() - processor.k {
+            let kmer = encode(seq[x..x + processor.k].as_bytes());
+            processor
+                .ref_kmers
+                .insert(canonical_kmer(kmer, processor.k));
         }
     }
-
-    ref_kmers
 }
 
-fn load_reference_sequences(
-    path: &str,
-) -> Result<HashMap<Arc<str>, Arc<str>>, Box<dyn std::error::Error>> {
-    let mut ref_seqs: HashMap<Arc<str>, Arc<str>> = HashMap::new();
+fn load_reference_sequences(path: &str) -> Result<AHashSet<Arc<str>>, Box<dyn std::error::Error>> {
+    let mut ref_seqs: AHashSet<Arc<str>> = AHashSet::new();
 
     // needletail automatically detects file format (FASTA/FASTQ) and handles compression
     let mut reader = needletail::parse_fastx_file(path)?;
@@ -163,7 +159,7 @@ fn load_reference_sequences(
         let id = std::str::from_utf8(record.id()).unwrap();
         let seq = String::from_utf8(record.seq().to_vec()).unwrap();
 
-        ref_seqs.insert(Arc::from(id), Arc::from(seq.as_str()));
+        ref_seqs.insert(Arc::from(seq.as_str()));
     }
 
     Ok(ref_seqs)
@@ -214,9 +210,9 @@ fn write_results_with_ids(
 /// Processes reads in a streaming fashion without loading all reads into memory
 fn process_reads(
     reads_path: &str,
-    ref_kmers: &HashSet<String>,
+    processor: KmerProcessor,
     k: usize,
-    threshold: usize,
+    threshold: u8,
     canonical: bool,
 ) -> Result<(Vec<(String, String)>, Vec<(String, String)>), Box<dyn std::error::Error>> {
     let mut matched = Vec::new();
@@ -229,21 +225,16 @@ fn process_reads(
         let record = record?;
         let id = String::from_utf8_lossy(record.id()).to_string();
         let seq = String::from_utf8_lossy(&record.seq()).to_string();
+        let mut hits = 0;
 
         // Extract k-mers from this single read
-        let mut read_kmers = HashSet::new();
         for i in 0..=seq.len() - k {
-            let kmer = &seq[i..i + k];
+            let kmer = encode(&seq[i..i + k].as_bytes());
 
-            if canonical {
-                read_kmers.insert(canonical_kmer(kmer));
-            } else {
-                read_kmers.insert(kmer.to_string());
+            if processor.ref_kmers.contains(&canonical_kmer(kmer, k)) {
+                hits += 1;
             }
         }
-
-        // Count hits against reference k-mers
-        let hits = read_kmers.intersection(ref_kmers).count();
 
         // Classify this read based on threshold
         if hits >= threshold {
@@ -257,7 +248,7 @@ fn process_reads(
 }
 
 /// Saves k-mer index to disk for reuse across multiple runs
-fn save_kmer_index(kmers: &HashSet<String>, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn save_kmer_index(kmers: AHashSet<u64>, path: &str) -> Result<(), Box<dyn std::error::Error>> {
     use std::fs::File;
     use std::io::BufWriter;
 
@@ -265,8 +256,9 @@ fn save_kmer_index(kmers: &HashSet<String>, path: &str) -> Result<(), Box<dyn st
     let mut writer = BufWriter::new(file);
 
     // Serialize k-mer set to binary format
-    bincode::encode_into_std_write(kmers, &mut writer, bincode::config::standard())?;
+    let kmers_vec: Vec<u64> = kmers.into_iter().collect();
+    bincode::encode_into_std_write(kmers_vec, &mut writer, bincode::config::standard())?;
 
-    println!("Saved {} k-mers to index file: {}", kmers.len(), path);
+    println!("Saved binary-encoded k-mers to index file: {}", path);
     Ok(())
 }
