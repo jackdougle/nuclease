@@ -26,20 +26,6 @@ pub fn decode(encoded: u64, k: usize) -> Vec<u8> {
     seq
 }
 
-/// Return the reverse complement of a nucleotide sequence (A, C, G, T only).
-pub fn reverse_complement_str(seq: &str) -> String {
-    seq.chars()
-        .rev()
-        .map(|b| match b {
-            'A' | 'a' => 'T',
-            'C' | 'c' => 'G',
-            'G' | 'g' => 'C',
-            'T' | 't' => 'A',
-            _ => 'N', // default for non-ACGT
-        })
-        .collect()
-}
-
 pub fn reverse_complement(kmer: u64, k: usize) -> u64 {
     let mut rc = 0u64;
     for i in 0..k {

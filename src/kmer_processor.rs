@@ -20,27 +20,44 @@ impl KmerProcessor {
         }
     }
 
-    pub fn process_ref(&mut self, ref_seq: &str) {
+    pub fn process_ref(&mut self, ref_seq: Vec<u8>) {
         if ref_seq.len() < self.k {
             panic!("Read sequence is shorter than k");
         }
 
-        for i in 0..=ref_seq.len() - self.k {}
+        let mut kmer = 0b00;
+
+        for i in 0..=ref_seq.len() - self.k {
+            if i == 0 {
+                kmer = encode(&ref_seq[0..self.k]);
+            } else {
+                // Shift left by 2 bits and add the new base
+                kmer = (kmer << 2) | encode(&[ref_seq[i + self.k - 1]]);
+            }
+            println!("kmer {}: {}", i, canonical_kmer(kmer, self.k));
+            self.ref_kmers.insert(canonical_kmer(kmer, self.k));
+        }
     }
 
-    pub fn process_read(&mut self, read_seq: &str) -> bool {
+    pub fn process_read(&self, read_seq: &str) -> bool {
         if read_seq.len() < self.k {
             panic!("Reference sequence is shorter than k")
         }
 
-        let mut count: u8 = 0;
+        let mut hits: u8 = 0;
+        let mut kmer = 0b00;
+
         for i in 0..=read_seq.len() - self.k {
-            let kmer = encode(&read_seq[i..i + self.k].as_bytes());
-            let canonical = canonical_kmer(kmer, self.k);
-            if self.ref_kmers.contains(&canonical) {
-                count += 1
+            if i == 0 {
+                kmer = encode(&read_seq[0..self.k].as_bytes());
+            } else {
+                // Shift left by 2 bits and add the new base
+                kmer = (kmer << 2) | encode(&[read_seq.as_bytes()[i + self.k - 1]]);
+            }
+            if self.ref_kmers.contains(&canonical_kmer(kmer, self.k)) {
+                hits += 1
             }
         }
-        if count >= self.threshold { true } else { false }
+        if hits >= self.threshold { true } else { false }
     }
 }
