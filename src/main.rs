@@ -5,8 +5,6 @@ mod kmer_processor;
 
 use clap::Parser;
 
-use crate::kmer_processor::KmerProcessor;
-
 /// K-mer matching tool for sequence analysis
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -43,8 +41,5 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    // let mut k_p = KmerProcessor::new(args.k, args.threshold);
-    // k_p.process_ref("ATCGTAGCTGACTGCATCAGTCAGTCAGCTAGACTGCACATGACGTACGTCAG");
-    // k_p.process_read("ATCGTAGCTGACTGCATCAGTCAGTCAGCTAGACTGCACATGACGTACGTCAG");
     cuttlefish::run(args);
 }

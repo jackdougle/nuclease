@@ -3,8 +3,8 @@ extern crate needletail;
 extern crate rayon;
 
 use crate::kmer_processor::KmerProcessor;
-use ahash::AHashSet;
 use rayon::prelude::*;
+use rustc_hash::FxHashSet;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 
@@ -31,7 +31,7 @@ pub fn run(args: crate::Args) {
     );
 
     // Try to load pre-built k-mer index, or build it if it doesn't exist
-    match load_kmer_index(serialized_kmers_filename, &mut kmer_processor) {
+    match load_kmer_index(serialized_kmers_filename, k, &mut kmer_processor) {
         Ok(kmers) => {
             println!(
                 "Loaded {} k-mers from pre-built index file: {}",
@@ -89,6 +89,7 @@ pub fn run(args: crate::Args) {
 /// Loads k-mer index from disk for fast startup
 fn load_kmer_index(
     path: &str,
+    k: usize,
     processor: &mut KmerProcessor,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let file = File::open(path)?;
@@ -195,7 +196,7 @@ fn process_reads(
 }
 
 /// Saves k-mer index to disk for reuse across multiple runs
-fn save_kmer_index(kmers: AHashSet<u64>, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn save_kmer_index(kmers: FxHashSet<u64>, path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
 

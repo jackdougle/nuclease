@@ -1,10 +1,10 @@
 use crate::kmer::*;
-use ahash::AHashSet;
+use rustc_hash::FxHashSet;
 
 pub struct KmerProcessor {
     pub k: usize,
     pub threshold: u8,
-    pub ref_kmers: AHashSet<u64>,
+    pub ref_kmers: FxHashSet<u64>,
     pub bit_cap: u64,
 }
 
@@ -14,7 +14,7 @@ impl KmerProcessor {
         KmerProcessor {
             k,
             threshold,
-            ref_kmers: AHashSet::new(),
+            ref_kmers: FxHashSet::default(),
             bit_cap: (1u64 << k * 2) - 1,
         }
     }
@@ -24,7 +24,7 @@ impl KmerProcessor {
             panic!("Read sequence is shorter than k");
         }
 
-        let mut kmer = 0b00;
+        let mut kmer: u64 = 0b00;
 
         for i in 0..=ref_seq.len() - self.k {
             if i == 0 {
