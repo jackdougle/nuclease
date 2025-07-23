@@ -1,5 +1,3 @@
-use std::io::Read;
-
 pub fn encode(sequence: &[u8]) -> u64 {
     sequence.iter().fold(0, |acc, &base| {
         (acc << 2)

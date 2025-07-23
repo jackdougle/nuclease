@@ -1,15 +1,16 @@
 extern crate bincode;
 extern crate needletail;
-extern crate rayon;
 
 use crate::kmer_processor::KmerProcessor;
-use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 
 // TODO:
 // - Add Rayon multi-threading
+// - Check Rust-Bio for k-mer utilities
+// - Add error handling for k-mer index loading
+// - Test BBDuk for speed and memory usage
 
 pub fn run(args: crate::Args) {
     let k = args.k;
@@ -31,7 +32,7 @@ pub fn run(args: crate::Args) {
     );
 
     // Try to load pre-built k-mer index, or build it if it doesn't exist
-    match load_kmer_index(serialized_kmers_filename, k, &mut kmer_processor) {
+    match load_kmer_index(serialized_kmers_filename, &mut kmer_processor) {
         Ok(kmers) => {
             println!(
                 "Loaded {} k-mers from pre-built index file: {}",
@@ -89,7 +90,6 @@ pub fn run(args: crate::Args) {
 /// Loads k-mer index from disk for fast startup
 fn load_kmer_index(
     path: &str,
-    k: usize,
     processor: &mut KmerProcessor,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let file = File::open(path)?;

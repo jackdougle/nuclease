@@ -7,9 +7,7 @@ edition = "2024"
 
 [dependencies]
 bincode = "2.0.1"
-bio = "2.3.0"
 clap = { version = "4.5.41", features = ["derive"] }
 needletail = "0.6.3"
-rayon = "1.10.0"
 hyperfine = "1.19.0"
 rustc-hash = "2.1.1"
