@@ -11,3 +11,4 @@ clap = { version = "4.5.41", features = ["derive"] }
 needletail = "0.6.3"
 hyperfine = "1.19.0"
 rustc-hash = "2.1.1"
+bio = "2.3.0"

@@ -1,19 +1,22 @@
-use rand::Rng;
+use bio::pattern_matching::shift_and::ShiftAnd;
+use rustc_hash::FxHashSet;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
-use std::thread;
+
+use crate::kmer::*;
+use crate::kmer_processor::KmerProcessor;
 
 pub fn run() {
     let chars: Vec<char> = vec!['A', 'T', 'C', 'G'];
-    let mut rng = rand::rng;
+    let rng = 2;
 
-    for x in 0..10 {
+    for _x in 0..10 {
         let mut word = String::new();
         // Use rand::Rng's gen_range method and a proper rng instance
         while word.len() <= 120 {
-            let n = rng().gen_range(0..4);
+            let n = rng;
             word.push(chars[n]);
         }
         println!("{}", word);
@@ -138,73 +141,6 @@ fn get_read_kmers(read_seqs: &HashMap<String, String>, k: usize) -> HashMap<Stri
     read_kmers
 }
 
-fn check_kmers(
-    ref_kmers: &HashSet<String>,
-    read_kmers: &HashMap<String, Vec<String>>,
-    threshold: usize,
-    canonical: bool,
-) -> (HashMap<String, Vec<String>>, HashMap<String, Vec<String>>) {
-    let mut matched: HashMap<String, Vec<String>> = HashMap::new();
-    let mut unmatched: HashMap<String, Vec<String>> = HashMap::new();
-
-    for (name, read_set) in read_kmers {
-        let mut count = 0;
-        let mut matched_kmers: Vec<String> = Vec::new();
-
-        for read in read_set {
-            let rev = rev_comp(read);
-            let canonical = if canonical {
-                std::cmp::min(read, &rev)
-            } else {
-                read
-            };
-
-            if ref_kmers.contains(canonical) {
-                count += 1;
-                matched_kmers.push(canonical.clone());
-            }
-        }
-        if count >= threshold {
-            matched
-                .entry(name.clone())
-                .or_insert(Vec::new())
-                .push(matched_kmers.join(", "));
-        } else {
-            unmatched
-                .entry(name.clone())
-                .or_insert(Vec::new())
-                .push(read_set.join(", "));
-        }
-    }
-
-    (matched, unmatched)
-}
-
-fn read_file_to_string(filename: &str) -> Result<String, std::io::Error> {
-    let mut file: File = File::open(filename)?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents)?;
-    Ok(contents)
-}
-
-fn load_seqs(path: &str) -> HashMap<String, String> {
-    let mut seqs: HashMap<String, String> = HashMap::new();
-
-    let seq_set =
-        read_file_to_string(path).expect(&format!("Error: Invalid reference file - {}", path));
-    let mut temp: &str = "";
-    for line in seq_set.lines() {
-        if temp.starts_with('>') {
-            seqs.insert(temp[6..].to_string(), line.to_string());
-        } else if temp.starts_with('@') {
-            seqs.insert(temp[1..].to_string(), line.to_string());
-        }
-        temp = &line;
-    }
-
-    seqs
-}
-
 /// Processes reads with parallel threading for better performance
 ///
 /// PURPOSE: Implement your goal of "number of CPUs to use" with "at least some
@@ -229,7 +165,7 @@ fn process_reads_parallel(
     threshold: usize,
     canonical: bool,
     num_threads: usize,
-) -> Result<(Vec<String>, Vec<Sxwtring>), Box<dyn std::error::Error>> {
+) -> Result<(Vec<String>, Vec<String>), Box<dyn std::error::Error>> {
     use std::sync::{Arc, Mutex};
     use std::thread;
 
@@ -303,108 +239,99 @@ fn process_reads_parallel(
     Ok((matched, unmatched))
 }
 
-/// Processes reads with configurable memory limits
-///
-/// PURPOSE: Implement your goal of "memory maximum" parameter. This function
-/// processes reads in chunks that fit within a specified memory limit, ensuring
-/// the program never exceeds the user's memory constraints.
-///
-/// HOW IT WORKS WITH NEEDLETAIL:
-/// - Uses needletail's streaming to read reads one at a time
-/// - Tracks memory usage of processed reads
-/// - Flushes results when memory limit is approached
-/// - Continues processing without exceeding limits
-///
-/// BENEFITS:
-/// - Respects user memory limits
-/// - Prevents out-of-memory crashes
-/// - Suitable for shared computing environments
-/// - Supports your goal of predictable resource usage
-fn process_with_memory_limit(
-    reads_path: &str,
-    ref_kmers: &HashSet<String>,
-    k: usize,
-    threshold: usize,
-    canonical: bool,
-    memory_limit_mb: usize,
-) -> Result<(Vec<String>, Vec<String>), Box<dyn std::error::Error>> {
-    let mut matched = Vec::new();
-    let mut unmatched = Vec::new();
-    let mut current_batch = Vec::new();
-    let mut current_memory = 0;
+#[test]
+fn test_kmer_fns() {
+    let seq_vec = b"TGCTCAGATCATGTTTGTGTGG";
+    let kmer = encode(seq_vec[0..21].try_into().unwrap());
+    let kmer2 = encode(seq_vec[1..22].try_into().unwrap());
 
-    let memory_limit_bytes = memory_limit_mb * 1024 * 1024;
+    println!("Encoded k-mer: {:042b}", kmer);
+    println!("Encoded k-mer: {:042b}", kmer2);
+    assert_ne!(kmer, kmer2);
+    assert_eq!(kmer, 0b111001110100100011010011101111111011101110);
 
-    let mut reader = needletail::parse_fastx_file(reads_path)?;
+    let bit_cap = (1u64 << 21 * 2) - 1;
+    let mut shifted_kmer = kmer;
+    assert_eq!(shifted_kmer, kmer);
 
-    while let Some(record) = reader.next() {
-        let record = record?;
-        let seq = String::from_utf8_lossy(&record.seq()).to_string();
+    shifted_kmer = ((kmer << 2) | encode(b"G")) & bit_cap;
+    println!("Shifted k-mer: {:b}", shifted_kmer);
 
-        // Estimate memory usage (rough calculation)
-        let seq_memory = seq.len() * std::mem::size_of::<char>();
+    assert_eq!(shifted_kmer, kmer2);
+    assert_ne!(shifted_kmer, kmer);
 
-        // If adding this sequence would exceed memory limit, process current batch
-        if current_memory + seq_memory > memory_limit_bytes && !current_batch.is_empty() {
-            let (batch_matched, batch_unmatched) =
-                process_batch(&current_batch, ref_kmers, k, threshold, canonical);
-            matched.extend(batch_matched);
-            unmatched.extend(batch_unmatched);
+    println!("Sequence vector: {:?}", seq_vec);
 
-            current_batch.clear();
-            current_memory = 0;
-        }
+    let decoded_seq = [
+        84, 71, 67, 84, 67, 65, 71, 65, 84, 67, 65, 84, 71, 84, 84, 84, 71, 84, 71, 84, 71, 71,
+    ];
 
-        current_batch.push(seq);
-        current_memory += seq_memory;
-    }
-    // Process final batch
-    if !current_batch.is_empty() {
-        let (batch_matched, batch_unmatched) =
-            process_batch(&current_batch, ref_kmers, k, threshold, canonical);
-        matched.extend(batch_matched);
-        unmatched.extend(batch_unmatched);
-    }
+    assert_eq!(decode(kmer, 21), decoded_seq[0..21]);
+    println!("Decoded k-mer 1: {:?}", decode(kmer, 21));
 
-    Ok((matched, unmatched))
+    assert_eq!(decode(kmer2, 21), decoded_seq[1..22]);
+    println!("Decoded k-mer 2: {:?}", decode(kmer2, 21));
+
+    assert_eq!(decode(shifted_kmer, 21), decoded_seq[1..22]);
+    println!("Decoded shifter: {:?}", decode(shifted_kmer, 21));
 }
 
-pub struct KmerProcessor {
-    pub current_kmer: u64,
-    pub k: usize,
-    pub kmers: HashSet<Kmer>,
-}
+#[test]
+fn test_kmer_processor() {
+    let k = 21;
+    let threshold = 1;
+    let mut processor = KmerProcessor::new(k, threshold);
+    let mut test_hash = FxHashSet::default();
 
-impl KmerProcessor {
-    pub fn new(k: usize) -> Self {
-        KmerProcessor {
-            current_kmer: 0,
-            k,
-            kmers: HashSet::new(),
-        }
-    }
+    // Test reference processing
+    let ref_seq = b"TGCTCAGATCATGTTTGTGTGAA";
+    let rev_seq = b"TTCACACAAACATGATCTGAGCA";
 
-    pub fn process(&mut self, seq: &[u8], id: Arc<str>) {
-        if seq.len() < self.k {
-            return; // Not enough bases for a k-mer
-        }
+    processor.process_ref(ref_seq.to_vec());
+    test_hash.insert(canonical_kmer(encode(&ref_seq[0..k]), k));
+    println!("First encoded K-mer: {}", encode(&ref_seq[0..k]));
+    test_hash.insert(canonical_kmer(encode(&ref_seq[1..k + 1]), k));
+    println!("First encoded K-mer: {}", encode(&ref_seq[1..k + 1]));
+    test_hash.insert(canonical_kmer(encode(&ref_seq[2..k + 2]), k));
 
-        for i in 0..=(seq.len() - self.k) {
-            let window = &seq[i..i + self.k];
-            let kmer = Kmer::new(window.try_into().unwrap(), id.clone());
-            self.kmers.insert(kmer);
-        }
-    }
+    println!("Ref K-mers in KP: {:#?}", processor.ref_kmers);
+    println!("Test hash K-mers: {:#?}", test_hash);
+    assert_eq!(processor.ref_kmers, test_hash);
 
-    pub fn rolling_hash(&mut self, base: u8) {
-        // Shift current k-mer left by 2 bits and add new base
-        self.current_kmer = ((self.current_kmer << 2) & ((1 << (self.k * 2)) - 1))
-            | match base {
-                b'A' => 0b00,
-                b'C' => 0b01,
-                b'G' => 0b10,
-                b'T' => 0b11,
-                _ => panic!("Invalid nucleotide base"),
-            };
-    }
+    println!("Original k-mer: {:b}", encode(&ref_seq[0..k]));
+    println!(
+        "Canon OG k-mer: {:b}",
+        canonical_kmer(encode(&ref_seq[0..k]), k)
+    );
+    println!("RC k-mer:       {:b}", encode(&rev_seq[2..k + 2]));
+    println!(
+        "Canon RC k-mer: {:b}",
+        canonical_kmer(encode(&rev_seq[2..k + 2]), k)
+    );
+
+    assert_eq!(
+        encode(&rev_seq[2..k + 2]),
+        canonical_kmer(encode(&rev_seq[2..k + 2]), k)
+    );
+    assert_eq!(
+        encode(&rev_seq[2..k + 2]),
+        canonical_kmer(encode(&ref_seq[0..k]), k)
+    );
+    assert_eq!(
+        canonical_kmer(encode(&rev_seq[0..k]), k),
+        canonical_kmer(encode(&ref_seq[2..k + 2]), k)
+    );
+
+    assert!(processor.ref_kmers.contains(&canonical_kmer(
+        encode(ref_seq[0..k].try_into().unwrap()),
+        k
+    )));
+
+    // Test read processing
+    let read_seq = "TGCTCAGATCATGTTTGTGTGG";
+    assert!(processor.process_read(read_seq));
+
+    // Test read with insufficient k-mers
+    let short_read = "TGCTCAGATC";
+    assert!(!processor.process_read(short_read));
 }

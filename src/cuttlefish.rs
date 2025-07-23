@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 
 // TODO:
+// - Fix canonical encoding so that canonical k-mers are detected
 // - Add Rayon multi-threading
 // - Check Rust-Bio for k-mer utilities
 // - Add error handling for k-mer index loading

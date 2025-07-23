@@ -1,7 +1,7 @@
 mod cuttlefish;
 mod kmer;
 mod kmer_processor;
-// mod test;
+mod test;
 
 use clap::Parser;
 

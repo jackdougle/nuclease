@@ -1,3 +1,5 @@
+use std::process::exit;
+
 use crate::kmer::*;
 use rustc_hash::FxHashSet;
 
@@ -33,13 +35,19 @@ impl KmerProcessor {
                 // Shift left by 2 bits and add the new base
                 kmer = ((kmer << 2) | encode(&[ref_seq[i + self.k - 1]])) & self.bit_cap;
             }
+            println!("Processed K-mer: {:?}", kmer);
             self.ref_kmers.insert(canonical_kmer(kmer, self.k));
         }
     }
 
     pub fn process_read(&self, read_seq: &str) -> bool {
         if read_seq.len() < self.k {
-            panic!("Reference sequence is shorter than k")
+            println!(
+                "Read sequence is shorter than k: {} < {}",
+                read_seq.len(),
+                self.k
+            );
+            return false;
         }
 
         let mut hits: u8 = 0;
