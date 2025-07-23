@@ -9,14 +9,17 @@ pub struct KmerProcessor {
     pub k: usize,
     pub threshold: u8,
     pub ref_kmers: AHashSet<u64>,
+    pub bit_cap: u64,
 }
 
 impl KmerProcessor {
     pub fn new(k: usize, threshold: u8) -> Self {
+        println!("KmerProcessor; k - {}, threshold - {}", k, threshold);
         KmerProcessor {
             k,
             threshold,
             ref_kmers: AHashSet::new(),
+            bit_cap: (1u64 << k * 2) - 1,
         }
     }
 
@@ -32,9 +35,8 @@ impl KmerProcessor {
                 kmer = encode(&ref_seq[0..self.k]);
             } else {
                 // Shift left by 2 bits and add the new base
-                kmer = (kmer << 2) | encode(&[ref_seq[i + self.k - 1]]);
+                kmer = ((kmer << 2) | encode(&[ref_seq[i + self.k - 1]])) & self.bit_cap;
             }
-            println!("kmer {}: {}", i, canonical_kmer(kmer, self.k));
             self.ref_kmers.insert(canonical_kmer(kmer, self.k));
         }
     }
@@ -52,7 +54,7 @@ impl KmerProcessor {
                 kmer = encode(&read_seq[0..self.k].as_bytes());
             } else {
                 // Shift left by 2 bits and add the new base
-                kmer = (kmer << 2) | encode(&[read_seq.as_bytes()[i + self.k - 1]]);
+                kmer = (kmer << 2) | encode(&[read_seq.as_bytes()[i + self.k - 1]]) & self.bit_cap;
             }
             if self.ref_kmers.contains(&canonical_kmer(kmer, self.k)) {
                 hits += 1

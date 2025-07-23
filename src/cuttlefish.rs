@@ -7,16 +7,9 @@ use ahash::AHashSet;
 use rayon::prelude::*;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
-use std::sync::Arc;
 
 // TODO:
-// - Add tests for program speed and memory usage
-// - Add a progress bar
-// - Add a way to specify the number of threads to use
-// - Add a way to specify the number of reads to process
-// - Add a way to specify the number of k-mers to process
-// - Add a way to specify the number of reference sequences to process
-// - Add a way to specify the number of query sequences to process
+// - Add Rayon multi-threading
 
 pub fn run(args: crate::Args) {
     let k = args.k;
@@ -106,8 +99,7 @@ fn load_kmer_index(
     let kmers_vec: Vec<u64> =
         bincode::decode_from_std_read(&mut reader, bincode::config::standard())?;
 
-    // Optional: check k-mer size if you encode it, but with u64 you can't check length directly
-    // If you want to check k, you should encode k as metadata in the file
+    // TODO: Add k-mer length error checking
 
     // Insert kmers into processor
     for kmer in kmers_vec {
@@ -127,10 +119,7 @@ fn load_reference_sequences(
     while let Some(record) = reader.next() {
         let record = record?;
 
-        // Convert byte slices to strings (needletail provides data as &[u8])
-        let seq = record.seq().to_vec();
-
-        processor.process_ref(seq);
+        processor.process_ref(record.seq().into());
     }
     Ok(())
 }
