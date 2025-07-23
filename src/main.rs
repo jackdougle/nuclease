@@ -1,7 +1,7 @@
+#[cfg(test)]
+mod cuttle_test;
 mod cuttlefish;
-mod kmer;
 mod kmer_processor;
-mod test;
 
 use clap::Parser;
 

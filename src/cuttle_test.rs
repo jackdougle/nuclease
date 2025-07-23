@@ -1,144 +1,20 @@
+use crate::kmer_processor::*;
 use bio::pattern_matching::shift_and::ShiftAnd;
 use rustc_hash::FxHashSet;
-use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::sync::{Arc, Mutex};
+use std::collections::HashSet;
+use std::sync::Arc;
 
-use crate::kmer::*;
-use crate::kmer_processor::KmerProcessor;
-
-pub fn run() {
-    let chars: Vec<char> = vec!['A', 'T', 'C', 'G'];
-    let rng = 2;
-
-    for _x in 0..10 {
-        let mut word = String::new();
-        // Use rand::Rng's gen_range method and a proper rng instance
-        while word.len() <= 120 {
-            let n = rng;
-            word.push(chars[n]);
-        }
-        println!("{}", word);
-    }
-}
-
-fn reverse_complement(seq: &str) -> String {
+pub fn reverse_complement_str(seq: &str) -> String {
     seq.chars()
         .rev()
         .map(|c| match c {
             'A' => 'T',
-            'T' => 'A',
             'C' => 'G',
             'G' => 'C',
-            _ => 'N',
+            'T' => 'A',
+            _ => 'X',
         })
         .collect()
-}
-
-fn extract_kmers(seq: &str, k: usize, canonical: bool) -> HashSet<String> {
-    let mut kmers = HashSet::new();
-    for i in 0..=seq.len() - k {
-        let kmer = &seq[i..i + k];
-        if canonical {
-            let rc = reverse_complement(kmer);
-            kmers.insert(std::cmp::min(kmer, &rc).to_string());
-        } else {
-            kmers.insert(kmer.to_string());
-        }
-    }
-    kmers
-}
-
-fn load_kmers(path: &str, k: usize, canonical: bool) -> HashSet<String> {
-    let file = File::open(path).expect("Cannot open reference file");
-    let reader = BufReader::new(file);
-
-    let mut kmers = HashSet::new();
-    let mut seq = String::new();
-    for line in reader.lines() {
-        let l = line.unwrap();
-        if l.starts_with('>') {
-            if !seq.is_empty() {
-                kmers.extend(extract_kmers(&seq, k, canonical));
-                seq.clear();
-            }
-        } else {
-            seq.push_str(&l);
-        }
-    }
-    if !seq.is_empty() {
-        kmers.extend(extract_kmers(&seq, k, canonical));
-    }
-
-    kmers
-}
-
-fn classify_reads(
-    reads: Vec<String>,
-    k: usize,
-    kmers: &HashSet<String>,
-    threshold: usize,
-    canonical: bool,
-) -> (Vec<String>, Vec<String>) {
-    let mut matched = Vec::new();
-    let mut unmatched = Vec::new();
-
-    for read in reads {
-        let read_kmers = extract_kmers(&read, k, canonical);
-        let hits = read_kmers.intersection(kmers).count();
-        if hits >= threshold {
-            matched.push(read);
-        } else {
-            unmatched.push(read);
-        }
-    }
-
-    (matched, unmatched)
-}
-
-pub fn main() {
-    let reference_path = "input/refs.fasta";
-    let reads = vec![
-        "GACGATCGATCGATCGATTACTTACTCAGGACGCTAG".to_string(),
-        "AGCTAGCTAGCTACGTACGCACTGCTAGCTAGCTAGCT".to_string(),
-    ];
-
-    // let test_path = "samples.fastq";
-
-    let k = 21;
-    let threshold = 3;
-    let canonical = true;
-
-    let reference_kmers = load_kmers(reference_path, k, true);
-    println!("Reference kmers: {:?}", reference_kmers);
-
-    // let test_kmers: HashSet<String> = load_kmers(test_path, k, false);
-    // println!("Test kmers: {:?}", test_kmers);
-
-    let (matched, unmatched) = classify_reads(reads, k, &reference_kmers, threshold, canonical);
-
-    println!("Matched reads: {:?}", matched);
-    println!("Unmatched reads: {:?}", unmatched);
-}
-
-fn get_read_kmers(read_seqs: &HashMap<String, String>, k: usize) -> HashMap<String, Vec<String>> {
-    let mut read_kmers: HashMap<String, Vec<String>> = HashMap::new();
-
-    for (name, seq) in read_seqs {
-        let expected_kmers = seq.len().saturating_sub(k) + 1;
-        let kmers_vec = read_kmers
-            .entry(name.clone())
-            .or_insert_with(|| Vec::with_capacity(expected_kmers));
-
-        for i in 0..=seq.len() - k {
-            let kmer = &seq[i..i + k];
-
-            kmers_vec.push(kmer.to_string());
-        }
-    }
-
-    read_kmers
 }
 
 /// Processes reads with parallel threading for better performance
@@ -197,7 +73,7 @@ fn process_reads_parallel(
                         let kmer = &seq[i..i + k];
 
                         if canonical {
-                            let rc = reverse_complement(kmer);
+                            let rc = reverse_complement_str(kmer);
                             read_kmers.insert(std::cmp::min(kmer, &rc).to_string());
                         } else {
                             read_kmers.insert(kmer.to_string());
@@ -288,11 +164,15 @@ fn test_kmer_processor() {
     let rev_seq = b"TTCACACAAACATGATCTGAGCA";
 
     processor.process_ref(ref_seq.to_vec());
+
     test_hash.insert(canonical_kmer(encode(&ref_seq[0..k]), k));
     println!("First encoded K-mer: {}", encode(&ref_seq[0..k]));
     test_hash.insert(canonical_kmer(encode(&ref_seq[1..k + 1]), k));
-    println!("First encoded K-mer: {}", encode(&ref_seq[1..k + 1]));
+    println!("Second encoded K-mer: {}", encode(&ref_seq[1..k + 1]));
     test_hash.insert(canonical_kmer(encode(&ref_seq[2..k + 2]), k));
+
+    assert!(processor.process_read(&String::from_utf8(ref_seq.to_vec()).unwrap()));
+    assert!(processor.process_read(&String::from_utf8(rev_seq.to_vec()).unwrap()));
 
     println!("Ref K-mers in KP: {:#?}", processor.ref_kmers);
     println!("Test hash K-mers: {:#?}", test_hash);
@@ -334,4 +214,23 @@ fn test_kmer_processor() {
     // Test read with insufficient k-mers
     let short_read = "TGCTCAGATC";
     assert!(!processor.process_read(short_read));
+}
+
+#[test]
+fn test_misc() {
+    let seq = "CCGACG";
+    let rev = reverse_complement_str(&reverse_complement_str(seq));
+    println!("Original sequence:  {}\nReverse complement: {}", seq, rev);
+    assert_eq!(seq, rev);
+
+    let arr_seq = b"AAAAA";
+    let processed_seq = decode(encode(arr_seq), 5);
+    println!("Original: {:#?}\nProcessed: {:#?}", arr_seq, processed_seq);
+    assert_eq!(arr_seq.to_vec(), processed_seq);
+}
+
+#[test]
+fn test_bio() {
+    let pattern = b"AGCTAGCTACG";
+    let shifter = ShiftAnd::new(pattern);
 }
