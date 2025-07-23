@@ -1,9 +1,5 @@
 use crate::kmer::*;
 use ahash::AHashSet;
-use needletail::bitkmer::canonical;
-use std::collections::HashSet;
-use std::hash::BuildHasherDefault;
-use std::sync::Arc;
 
 pub struct KmerProcessor {
     pub k: usize,

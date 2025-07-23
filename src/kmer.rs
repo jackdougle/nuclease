@@ -1,3 +1,5 @@
+use std::io::Read;
+
 pub fn encode(sequence: &[u8]) -> u64 {
     sequence.iter().fold(0, |acc, &base| {
         (acc << 2)
@@ -23,7 +25,7 @@ pub fn decode(encoded: u64, k: usize) -> Vec<u8> {
         };
         seq.push(base);
     }
-    seq
+    seq.into_iter().rev().collect()
 }
 
 pub fn reverse_complement(kmer: u64, k: usize) -> u64 {
@@ -43,30 +45,38 @@ pub fn canonical_kmer(kmer: u64, k: usize) -> u64 {
 }
 
 #[test]
-fn test_kmer_struct() {
-    let seq_vec = b"AGCTCAGATCATGTTTGTGTGG";
+fn test_kmer_fns() {
+    let seq_vec = b"TGCTCAGATCATGTTTGTGTGG";
     let kmer = encode(seq_vec[0..21].try_into().unwrap());
-    let kmer2 = encode(seq_vec[0..21].try_into().unwrap());
+    let kmer2 = encode(seq_vec[1..22].try_into().unwrap());
 
     println!("Encoded k-mer: {:042b}", kmer);
     println!("Encoded k-mer: {:042b}", kmer2);
-    assert_eq!(kmer, 0b001001110100100011010011101111111011101110);
-
     assert_ne!(kmer, kmer2);
-    assert_eq!(kmer, kmer2);
-    println!("k-mer 1: {}, k-mer 2: {}", kmer, kmer2);
+    assert_eq!(kmer, 0b111001110100100011010011101111111011101110);
 
-    let decoded_seq: [u8; 21] = [
-        71, 84, 71, 84, 71, 84, 84, 84, 71, 84, 65, 67, 84, 65, 71, 65, 67, 84, 67, 71, 65,
+    let bit_cap = (1u64 << 21 * 2) - 1;
+    let mut shifted_kmer = kmer;
+    assert_eq!(shifted_kmer, kmer);
+
+    shifted_kmer = ((kmer << 2) | encode(b"G")) & bit_cap;
+    println!("Shifted k-mer: {:b}", shifted_kmer);
+
+    assert_eq!(shifted_kmer, kmer2);
+    assert_ne!(shifted_kmer, kmer);
+
+    println!("Sequence vector: {:?}", seq_vec);
+
+    let decoded_seq = [
+        84, 71, 67, 84, 67, 65, 71, 65, 84, 67, 65, 84, 71, 84, 84, 84, 71, 84, 71, 84, 71, 71,
     ];
 
+    assert_eq!(decode(kmer, 21), decoded_seq[0..21]);
     println!("Decoded k-mer 1: {:?}", decode(kmer, 21));
-    assert_eq!(decode(kmer, 21), decoded_seq);
 
-    let ex_str = b"AGCTCAGATCATGTTTGTGTG";
+    assert_eq!(decode(kmer2, 21), decoded_seq[1..22]);
+    println!("Decoded k-mer 2: {:?}", decode(kmer2, 21));
 
-    // Convert [u8] to String (assuming ASCII ACGT bases)
-    let decoded_str = String::from_utf8(decoded_seq.to_vec()).unwrap();
-    println!("{}", decoded_str); // prints e.g. "AGTACGTGAC"
-    assert_ne!(&decode(kmer, 21), ex_str);
+    assert_eq!(decode(shifted_kmer, 21), decoded_seq[1..22]);
+    println!("Decoded shifter: {:?}", decode(shifted_kmer, 21));
 }
