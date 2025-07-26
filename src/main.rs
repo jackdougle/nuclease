@@ -22,7 +22,7 @@ struct Args {
     canonical: bool,
 
     /// Reference file path
-    #[arg(short, long, default_value_t = String::from("in/references.fa"))]
+    #[arg(short, long, default_value_t = String::from("in/10k_refs.fa"))]
     reference: String,
 
     /// Reads file path
