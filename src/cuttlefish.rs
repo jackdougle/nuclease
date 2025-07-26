@@ -1,15 +1,12 @@
-extern crate bincode;
-extern crate needletail;
-
 use crate::kmer_processor::KmerProcessor;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
 // TODO:
+// - Check out SIMD encoding
+// - Check Rust-Bio for all kmer/hashing operations
 // - Test BBDuk for speed and memory usage
 // - Add Rayon multi-threading
-// - Check Rust-Bio for k-mer utilities
-// - Add error handling for k-mer index loading
 
 pub fn run(args: crate::Args) {
     let k = args.k;

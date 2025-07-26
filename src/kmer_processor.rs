@@ -1,4 +1,4 @@
-use needletail::sequence::canonical;
+use needletail::bitkmer::canonical;
 use rustc_hash::FxHashSet;
 
 pub struct KmerProcessor {
@@ -33,7 +33,8 @@ impl KmerProcessor {
                 // Shift left by 2 bits and add the new base
                 kmer = ((kmer << 2) | encode(&[ref_seq[i + self.k - 1]])) & self.bit_cap;
             }
-            self.ref_kmers.insert(canonical_kmer(kmer, self.k));
+            self.ref_kmers.insert(canonical((kmer, self.k as u8)).0.0);
+            // self.ref_kmers.insert(canonical_kmer(kmer, self.k));
         }
     }
 
@@ -57,8 +58,10 @@ impl KmerProcessor {
                 // Shift left by 2 bits and add the new base
                 kmer = ((kmer << 2) | encode(&[read_seq[i + self.k - 1]])) & self.bit_cap;
             }
-            //if self.ref_kmers.contains(&canonical_kmer(kmer, self.k)) {
-            if self.ref_kmers.contains(&canonical_kmer(kmer, self.k)) {
+            if self
+                .ref_kmers
+                .contains(&canonical((kmer, self.k as u8)).0.0)
+            {
                 hits += 1;
                 if hits >= self.threshold {
                     return true;
@@ -69,34 +72,20 @@ impl KmerProcessor {
     }
 }
 
+#[inline(always)]
 pub fn encode(sequence: &[u8]) -> u64 {
-    sequence.iter().fold(0, |acc, &base| {
-        (acc << 2)
-            | match base {
-                b'A' | b'a' => 0b00,
-                b'C' | b'c' => 0b01,
-                b'G' | b'g' => 0b10,
-                b'T' | b't' => 0b11,
-                _ => panic!("Invalid nucleotide base"),
-            }
+    const BASE_TABLE: [u8; 256] = {
+        let mut bases = [0u8; 256];
+        bases[b'A' as usize] = 0b00;
+        bases[b'C' as usize] = 0b01;
+        bases[b'G' as usize] = 0b10;
+        bases[b'T' as usize] = 0b11;
+        bases
+    };
+
+    sequence.iter().fold(0u64, |encoded, &base| {
+        let val = BASE_TABLE[base as usize];
+        assert!(val <= 0b11, "Invalid base: {}", base as char);
+        (encoded << 2) | val as u64
     })
-}
-
-#[inline(always)]
-pub fn reverse_complement(kmer: u64, k: usize) -> u64 {
-    let mut rc = 0u64;
-    let mut shift = (k - 1) * 2;
-    for i in 0..k {
-        let base = (kmer >> (i * 2)) & 0b11;
-        let comp = base ^ 0b11;
-        rc |= comp << shift;
-        shift -= 2;
-    }
-    rc
-}
-
-#[inline(always)]
-pub fn canonical_kmer(kmer: u64, k: usize) -> u64 {
-    let rc = reverse_complement(kmer, k);
-    if kmer < rc { kmer } else { rc }
 }

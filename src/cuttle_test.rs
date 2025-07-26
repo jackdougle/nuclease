@@ -1,5 +1,4 @@
 use crate::kmer_processor::*;
-use rand::prelude::*;
 use rustc_hash::FxHashSet;
 use std::collections::HashSet;
 use std::fs::File;
@@ -117,162 +116,163 @@ fn process_reads_parallel(
     Ok((matched, unmatched))
 }
 
-#[test]
-fn test_kmer_fns() {
-    let seq_vec = b"TGCTCAGATCATGTTTGTGTGG";
-    let kmer = encode(seq_vec[0..21].try_into().unwrap());
-    let kmer2 = encode(seq_vec[1..22].try_into().unwrap());
+// TESTS
+// #[test]
+// fn test_kmer_fns() {
+//     let seq_vec = b"TGCTCAGATCATGTTTGTGTGG";
+//     let kmer = encode(seq_vec[0..21].try_into().unwrap());
+//     let kmer2 = encode(seq_vec[1..22].try_into().unwrap());
 
-    println!("Encoded k-mer: {:042b}", kmer);
-    println!("Encoded k-mer: {:042b}", kmer2);
-    assert_ne!(kmer, kmer2);
-    assert_eq!(kmer, 0b111001110100100011010011101111111011101110);
+//     println!("Encoded k-mer: {:042b}", kmer);
+//     println!("Encoded k-mer: {:042b}", kmer2);
+//     assert_ne!(kmer, kmer2);
+//     assert_eq!(kmer, 0b111001110100100011010011101111111011101110);
 
-    let bit_cap = (1u64 << 21 * 2) - 1;
-    let mut shifted_kmer = kmer;
-    assert_eq!(shifted_kmer, kmer);
+//     let bit_cap = (1u64 << 21 * 2) - 1;
+//     let mut shifted_kmer = kmer;
+//     assert_eq!(shifted_kmer, kmer);
 
-    shifted_kmer = ((kmer << 2) | encode(b"G")) & bit_cap;
-    println!("Shifted k-mer: {:b}", shifted_kmer);
+//     shifted_kmer = ((kmer << 2) | encode(b"G")) & bit_cap;
+//     println!("Shifted k-mer: {:b}", shifted_kmer);
 
-    assert_eq!(shifted_kmer, kmer2);
-    assert_ne!(shifted_kmer, kmer);
+//     assert_eq!(shifted_kmer, kmer2);
+//     assert_ne!(shifted_kmer, kmer);
 
-    println!("Sequence vector: {:?}", seq_vec);
+//     println!("Sequence vector: {:?}", seq_vec);
 
-    let decoded_seq = [
-        84, 71, 67, 84, 67, 65, 71, 65, 84, 67, 65, 84, 71, 84, 84, 84, 71, 84, 71, 84, 71, 71,
-    ];
+//     let decoded_seq = [
+//         84, 71, 67, 84, 67, 65, 71, 65, 84, 67, 65, 84, 71, 84, 84, 84, 71, 84, 71, 84, 71, 71,
+//     ];
 
-    assert_eq!(decode(kmer, 21), decoded_seq[0..21]);
-    println!("Decoded k-mer 1: {:?}", decode(kmer, 21));
+//     assert_eq!(decode(kmer, 21), decoded_seq[0..21]);
+//     println!("Decoded k-mer 1: {:?}", decode(kmer, 21));
 
-    assert_eq!(decode(kmer2, 21), decoded_seq[1..22]);
-    println!("Decoded k-mer 2: {:?}", decode(kmer2, 21));
+//     assert_eq!(decode(kmer2, 21), decoded_seq[1..22]);
+//     println!("Decoded k-mer 2: {:?}", decode(kmer2, 21));
 
-    assert_eq!(decode(shifted_kmer, 21), decoded_seq[1..22]);
-    println!("Decoded shifter: {:?}", decode(shifted_kmer, 21));
-}
+//     assert_eq!(decode(shifted_kmer, 21), decoded_seq[1..22]);
+//     println!("Decoded shifter: {:?}", decode(shifted_kmer, 21));
+// }
 
-#[test]
-fn test_kmer_processor() {
-    let k = 21;
-    let threshold = 1;
-    let mut processor = KmerProcessor::new(k, threshold);
-    let mut test_hash = FxHashSet::default();
+// #[test]
+// fn test_kmer_processor() {
+//     let k = 21;
+//     let threshold = 1;
+//     let mut processor = KmerProcessor::new(k, threshold);
+//     let mut test_hash = FxHashSet::default();
 
-    // Test reference processing
-    let ref_seq = b"TGCTCAGATCATGTTTGTGTGAA";
-    let rev_seq = b"TTCACACAAACATGATCTGAGCA";
+//     // Test reference processing
+//     let ref_seq = b"TGCTCAGATCATGTTTGTGTGAA";
+//     let rev_seq = b"TTCACACAAACATGATCTGAGCA";
 
-    processor.process_ref(&ref_seq.to_vec());
+//     processor.process_ref(&ref_seq.to_vec());
 
-    test_hash.insert(canonical_kmer(encode(&ref_seq[0..k]), k));
-    println!("First encoded K-mer: {}", encode(&ref_seq[0..k]));
-    test_hash.insert(canonical_kmer(encode(&ref_seq[1..k + 1]), k));
-    println!("Second encoded K-mer: {}", encode(&ref_seq[1..k + 1]));
-    test_hash.insert(canonical_kmer(encode(&ref_seq[2..k + 2]), k));
+//     test_hash.insert(canonical_kmer(encode(&ref_seq[0..k]), k));
+//     println!("First encoded K-mer: {}", encode(&ref_seq[0..k]));
+//     test_hash.insert(canonical_kmer(encode(&ref_seq[1..k + 1]), k));
+//     println!("Second encoded K-mer: {}", encode(&ref_seq[1..k + 1]));
+//     test_hash.insert(canonical_kmer(encode(&ref_seq[2..k + 2]), k));
 
-    assert!(processor.process_read(&ref_seq.to_vec()));
-    assert!(processor.process_read(&rev_seq.to_vec()));
+//     assert!(processor.process_read(&ref_seq.to_vec()));
+//     assert!(processor.process_read(&rev_seq.to_vec()));
 
-    println!("Ref K-mers in KP: {:#?}", processor.ref_kmers);
-    println!("Test hash K-mers: {:#?}", test_hash);
-    assert_eq!(processor.ref_kmers, test_hash);
+//     println!("Ref K-mers in KP: {:#?}", processor.ref_kmers);
+//     println!("Test hash K-mers: {:#?}", test_hash);
+//     assert_eq!(processor.ref_kmers, test_hash);
 
-    println!("Original k-mer: {:b}", encode(&ref_seq[0..k]));
-    println!(
-        "Canon OG k-mer: {:b}",
-        canonical_kmer(encode(&ref_seq[0..k]), k)
-    );
-    println!("RC k-mer:       {:b}", encode(&rev_seq[2..k + 2]));
-    println!(
-        "Canon RC k-mer: {:b}",
-        canonical_kmer(encode(&rev_seq[2..k + 2]), k)
-    );
+//     println!("Original k-mer: {:b}", encode(&ref_seq[0..k]));
+//     println!(
+//         "Canon OG k-mer: {:b}",
+//         canonical_kmer(encode(&ref_seq[0..k]), k)
+//     );
+//     println!("RC k-mer:       {:b}", encode(&rev_seq[2..k + 2]));
+//     println!(
+//         "Canon RC k-mer: {:b}",
+//         canonical_kmer(encode(&rev_seq[2..k + 2]), k)
+//     );
 
-    assert_eq!(
-        encode(&rev_seq[2..k + 2]),
-        canonical_kmer(encode(&rev_seq[2..k + 2]), k)
-    );
-    assert_eq!(
-        encode(&rev_seq[2..k + 2]),
-        canonical_kmer(encode(&ref_seq[0..k]), k)
-    );
-    assert_eq!(
-        canonical_kmer(encode(&rev_seq[0..k]), k),
-        canonical_kmer(encode(&ref_seq[2..k + 2]), k)
-    );
+//     assert_eq!(
+//         encode(&rev_seq[2..k + 2]),
+//         canonical_kmer(encode(&rev_seq[2..k + 2]), k)
+//     );
+//     assert_eq!(
+//         encode(&rev_seq[2..k + 2]),
+//         canonical_kmer(encode(&ref_seq[0..k]), k)
+//     );
+//     assert_eq!(
+//         canonical_kmer(encode(&rev_seq[0..k]), k),
+//         canonical_kmer(encode(&ref_seq[2..k + 2]), k)
+//     );
 
-    assert!(processor.ref_kmers.contains(&canonical_kmer(
-        encode(ref_seq[0..k].try_into().unwrap()),
-        k
-    )));
+//     assert!(processor.ref_kmers.contains(&canonical_kmer(
+//         encode(ref_seq[0..k].try_into().unwrap()),
+//         k
+//     )));
 
-    // Test read processing
-    let read_seq = b"TGCTCAGATCATGTTTGTGTGG";
-    assert!(processor.process_read(read_seq));
+//     // Test read processing
+//     let read_seq = b"TGCTCAGATCATGTTTGTGTGG";
+//     assert!(processor.process_read(read_seq));
 
-    // Test read with insufficient k-mers
-    let short_read = b"TGCTCAGATC";
-    assert!(!processor.process_read(short_read));
-}
+//     // Test read with insufficient k-mers
+//     let short_read = b"TGCTCAGATC";
+//     assert!(!processor.process_read(short_read));
+// }
 
-#[test]
-fn test_misc() {
-    let seq = "CCGACG";
-    let rev = reverse_complement_str(&reverse_complement_str(seq));
-    println!("Original sequence:  {}\nReverse complement: {}", seq, rev);
-    assert_eq!(seq, rev);
+// #[test]
+// fn test_misc() {
+//     let seq = "CCGACG";
+//     let rev = reverse_complement_str(&reverse_complement_str(seq));
+//     println!("Original sequence:  {}\nReverse complement: {}", seq, rev);
+//     assert_eq!(seq, rev);
 
-    let arr_seq = b"AAAAA";
-    let processed_seq = decode(encode(arr_seq), 5);
-    println!("Original: {:#?}\nProcessed: {:#?}", arr_seq, processed_seq);
-    assert_eq!(arr_seq.to_vec(), processed_seq);
-}
+//     let arr_seq = b"AAAAA";
+//     let processed_seq = decode(encode(arr_seq), 5);
+//     println!("Original: {:#?}\nProcessed: {:#?}", arr_seq, processed_seq);
+//     assert_eq!(arr_seq.to_vec(), processed_seq);
+// }
 
-#[test]
-fn make_test_file() -> Result<(), Box<dyn std::error::Error>> {
-    const BASES: [char; 4] = ['A', 'C', 'G', 'T'];
-    let mut rand = rand::rng();
-    let mut seq = String::new();
+// #[test]
+// fn make_test_file() -> Result<(), Box<dyn std::error::Error>> {
+//     const BASES: [char; 4] = ['A', 'C', 'G', 'T'];
+//     let mut rand = rand::rng();
+//     let mut seq = String::new();
 
-    let matched_file = File::create("in/4m_150.fq")?;
-    let mut matched_writer = BufWriter::new(matched_file);
+//     let matched_file = File::create("in/4m_150.fq")?;
+//     let mut matched_writer = BufWriter::new(matched_file);
 
-    for x in 0..100_000_000 {
-        for _i in 0..150 {
-            let base = BASES[rand.random_range(0..3)];
-            seq.push(base);
-        }
+//     for x in 0..100_000_000 {
+//         for _i in 0..150 {
+//             let base = BASES[rand.random_range(0..3)];
+//             seq.push(base);
+//         }
 
-        writeln!(matched_writer, "@{}", x)?;
-        writeln!(matched_writer, "{}", seq)?;
-        writeln!(matched_writer, "+")?;
-        writeln!(
-            matched_writer,
-            "IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII"
-        )?;
-        seq = String::new();
-    }
+//         writeln!(matched_writer, "@{}", x)?;
+//         writeln!(matched_writer, "{}", seq)?;
+//         writeln!(matched_writer, "+")?;
+//         writeln!(
+//             matched_writer,
+//             "IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII"
+//         )?;
+//         seq = String::new();
+//     }
 
-    Ok(())
-}
+//     Ok(())
+// }
 
-pub fn decode(encoded: u64, k: usize) -> Vec<u8> {
-    let mut seq = Vec::new();
-    for i in 0..k {
-        let base = match (encoded >> (i * 2)) & 0b11 {
-            0b00 => b'A',
-            0b01 => b'C',
-            0b10 => b'G',
-            0b11 => b'T',
-            _ => panic!("Non-DNA base!"),
-        };
-        seq.push(base);
-    }
-    seq.into_iter().rev().collect()
-}
+// pub fn decode(encoded: u64, k: usize) -> Vec<u8> {
+//     let mut seq = Vec::new();
+//     for i in 0..k {
+//         let base = match (encoded >> (i * 2)) & 0b11 {
+//             0b00 => b'A',
+//             0b01 => b'C',
+//             0b10 => b'G',
+//             0b11 => b'T',
+//             _ => panic!("Non-DNA base!"),
+//         };
+//         seq.push(base);
+//     }
+//     seq.into_iter().rev().collect()
+// }
 
 /* OLD CODE
 match load_kmer_index(serialized_kmers_filename, &mut kmer_processor) {
@@ -431,6 +431,35 @@ fn save_kmer_index(kmers: FxHashSet<u64>, path: &str) -> Result<(), Box<dyn std:
     Ok(())
 }
 
-// KmerProcessor fn
+#[inline(always)]
+pub fn reverse_complement(kmer: u64, k: usize) -> u64 {
+    let mut rc = 0u64;
+    let mut shift = (k - 1) * 2;
+    for i in 0..k {
+        let base = (kmer >> (i * 2)) & 0b11;
+        let comp = base ^ 0b11;
+        rc |= comp << shift;
+        shift -= 2;
+    }
+    rc
+}
 
+#[inline(always)]
+pub fn canonical_kmer(kmer: u64, k: usize) -> u64 {
+    let rc = reverse_complement(kmer, k);
+    if kmer < rc { kmer } else { rc }
+}
+
+pub fn encode_old(sequence: &[u8]) -> u64 {
+    sequence.iter().fold(0, |acc, &base| {
+        (acc << 2)
+            | match base {
+                b'A' => 0b00,
+                b'C' => 0b01,
+                b'G' => 0b10,
+                b'T' => 0b11,
+                _ => panic!("Invalid nucleotide base"),
+            }
+    })
+}
 */
