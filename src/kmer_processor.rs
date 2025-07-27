@@ -30,11 +30,9 @@ impl KmerProcessor {
             if i == 0 {
                 kmer = encode(&ref_seq[0..self.k]);
             } else {
-                // Shift left by 2 bits and add the new base
                 kmer = ((kmer << 2) | encode(&[ref_seq[i + self.k - 1]])) & self.bit_cap;
             }
             self.ref_kmers.insert(canonical((kmer, self.k as u8)).0.0);
-            // self.ref_kmers.insert(canonical_kmer(kmer, self.k));
         }
     }
 
@@ -55,7 +53,6 @@ impl KmerProcessor {
             if i == 0 {
                 kmer = encode(&read_seq[0..self.k]);
             } else {
-                // Shift left by 2 bits and add the new base
                 kmer = ((kmer << 2) | encode(&[read_seq[i + self.k - 1]])) & self.bit_cap;
             }
             if self
@@ -73,7 +70,7 @@ impl KmerProcessor {
 }
 
 #[inline(always)]
-pub fn encode(sequence: &[u8]) -> u64 {
+pub fn encode(seq: &[u8]) -> u64 {
     const BASE_TABLE: [u8; 256] = {
         let mut bases = [0u8; 256];
         bases[b'A' as usize] = 0b00;
@@ -83,9 +80,13 @@ pub fn encode(sequence: &[u8]) -> u64 {
         bases
     };
 
-    sequence.iter().fold(0u64, |encoded, &base| {
+    seq.iter().fold(0u64, |encoded, &base| {
         let val = BASE_TABLE[base as usize];
-        assert!(val <= 0b11, "Invalid base: {}", base as char);
+        debug_assert!(val <= 0b11, "Invalid base: {}", base as char);
         (encoded << 2) | val as u64
     })
+}
+
+pub fn encode_simd(seq: &[u8]) -> u64 {
+    unimplemented!()
 }
