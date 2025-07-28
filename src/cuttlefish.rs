@@ -1,6 +1,9 @@
+extern crate bincode;
+extern crate needletail;
+
 use crate::kmer_processor::KmerProcessor;
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::{BufReader, BufWriter, Write};
 
 // TODO:
 // - Check out SIMD encoding
@@ -15,7 +18,7 @@ pub fn run(args: crate::Args) {
     let query_filename = &args.query;
     let matched_filename = &args.matched_path;
     let unmatched_filename = &args.unmatched_path;
-
+    let serialized_filename = &args.serialized_kmers_filename;
     let mut kmer_processor = KmerProcessor::new(k, threshold);
 
     println!("matched_filename: {}", matched_filename);
@@ -25,18 +28,36 @@ pub fn run(args: crate::Args) {
         k, threshold, reference_filename, query_filename
     );
 
-    match load_reference_sequences(reference_filename, &mut kmer_processor) {
-        Ok(_ok) => {
+    match load_serialized_kmers(serialized_filename, &mut kmer_processor) {
+        Ok(()) => {
             println!(
-                "Loaded reference sequences\nProcessing reads from read path: {}",
-                query_filename
-            );
+                "Successfully loaded serialized k-mers from path: {}",
+                serialized_filename
+            )
         }
         Err(e) => {
-            eprintln!("Error loading reference sequences: {}", e);
-            std::process::exit(1);
+            eprintln!(
+                "Invalid/no seralized k-mers found, loading references from path: {}",
+                reference_filename
+            );
+
+            match get_reference_kmers(reference_filename, &mut kmer_processor) {
+                Ok(()) => println!(
+                    "Loaded reference sequences\nProcessing reads from read path: {}",
+                    query_filename
+                ),
+                Err(e) => {
+                    eprintln!("Error loading reference sequences: {}", e);
+                    std::process::exit(1);
+                }
+            };
+
+            match serialize_kmers(serialized_filename, &mut kmer_processor) {
+                Ok(()) => println!("Saved serialized k-mers to path: {}", serialized_filename),
+                Err(e) => eprintln!("Could not serialize reference k-mers: {}", e),
+            }
         }
-    };
+    }
 
     match process_reads_and_write_streaming(
         &query_filename,
@@ -52,7 +73,19 @@ pub fn run(args: crate::Args) {
     }
 }
 
-fn load_reference_sequences(
+fn load_serialized_kmers(
+    path: &str,
+    processor: &mut KmerProcessor,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let serialized_kmer_file = File::open(path)?;
+    let mut reader = BufReader::new(serialized_kmer_file);
+
+    processor.ref_kmers = bincode::decode_from_std_read(&mut reader, bincode::config::standard())?;
+
+    Ok(())
+}
+
+fn get_reference_kmers(
     path: &str,
     processor: &mut KmerProcessor,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -63,6 +96,23 @@ fn load_reference_sequences(
 
         processor.process_ref(&record.seq());
     }
+    Ok(())
+}
+
+fn serialize_kmers(
+    path: &str,
+    processor: &mut KmerProcessor,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let file = File::create(path)?;
+    let mut writer = BufWriter::new(file);
+
+    bincode::encode_into_std_write(
+        &processor.ref_kmers,
+        &mut writer,
+        bincode::config::standard(),
+    )?;
+
+    println!("Saved binary-encoded k-mers to index file: {}", path);
     Ok(())
 }
 

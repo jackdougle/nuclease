@@ -22,14 +22,14 @@ struct Args {
     canonical: bool,
 
     /// Reference file path
-    #[arg(short, long, default_value_t = String::from("in/10k_refs.fa"))]
+    #[arg(short, long, default_value_t = String::from("in/10k_150.fa"))]
     reference: String,
 
     /// Reads file path
     #[arg(short, long, default_value_t = String::from("in/100k_150.fq"))]
     query: String,
 
-    #[arg(short, long, default_value_t = String::from("in/reference_kmers.bin"))]
+    #[arg(short, long, default_value_t = String::from("in/serialized_kmers.bin"))]
     serialized_kmers_filename: String,
 
     #[arg(short, long, default_value_t = String::from("out/matched.fa"))]

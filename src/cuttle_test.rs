@@ -329,27 +329,6 @@ match process_reads(&query_filename, kmer_processor) {
     }
 }
 
-fn load_kmer_index(
-    path: &str,
-    processor: &mut KmerProcessor,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-
-    // Deserialize k-mer set from binary format as Vec<u64>
-    let kmers_vec: Vec<u64> =
-        bincode::decode_from_std_read(&mut reader, bincode::config::standard())?;
-
-    // TODO: Add k-mer length error checking
-
-    // Insert kmers into processor
-    for kmer in kmers_vec {
-        processor.ref_kmers.insert(kmer);
-    }
-
-    Ok(())
-}
-
 fn write_results_with_ids(
     matched: &[(String, String)],   // (read_id, sequence)
     unmatched: &[(String, String)], // (read_id, sequence)
@@ -417,18 +396,6 @@ fn process_reads(
     }
 
     Ok((matched, unmatched))
-}
-
-fn save_kmer_index(kmers: FxHashSet<u64>, path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let file = File::create(path)?;
-    let mut writer = BufWriter::new(file);
-
-    // Serialize k-mer set to binary format
-    let kmers_vec: Vec<u64> = kmers.into_iter().collect();
-    bincode::encode_into_std_write(kmers_vec, &mut writer, bincode::config::standard())?;
-
-    println!("Saved binary-encoded k-mers to index file: {}", path);
-    Ok(())
 }
 
 #[inline(always)]
