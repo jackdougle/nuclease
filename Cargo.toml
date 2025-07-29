@@ -13,6 +13,7 @@ rustc-hash = "2.1.1"
 samply = "0.13.1"
 rayon = "1.10.0"
 bincode = "2.0.1"
+wide = "0.7.33"
 
 [profile.release]
 debug = 1

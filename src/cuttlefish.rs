@@ -2,8 +2,10 @@ extern crate bincode;
 extern crate needletail;
 
 use crate::kmer_processor::KmerProcessor;
+use rayon::prelude::*;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
+use std::sync::Arc;
 
 // TODO:
 // - Check out SIMD encoding
@@ -37,8 +39,8 @@ pub fn run(args: crate::Args) {
         }
         Err(e) => {
             eprintln!(
-                "Invalid/no seralized k-mers found, loading references from path: {}",
-                reference_filename
+                "Invalid/no seralized k-mers found: {}\nLoading references from path: {}",
+                e, reference_filename
             );
 
             match get_reference_kmers(reference_filename, &mut kmer_processor) {
@@ -59,25 +61,35 @@ pub fn run(args: crate::Args) {
         }
     }
 
-    match process_reads_and_write_streaming(
+    // match process_reads(
+    //     &query_filename,
+    //     kmer_processor,
+    //     matched_filename,
+    //     unmatched_filename,
+    // ) {
+    //     Ok(()) => {}
+    //     Err(e) => {
+    //         eprintln!("Error processing reads: {}", e);
+    //         std::process::exit(1);
+    //     }
+    // }
+
+    match get_read_chunks(
         &query_filename,
         kmer_processor,
-        matched_filename,
-        unmatched_filename,
+        &matched_filename,
+        &unmatched_filename,
     ) {
         Ok(()) => {}
-        Err(e) => {
-            eprintln!("Error processing reads: {}", e);
-            std::process::exit(1);
-        }
+        Err(_e) => {}
     }
 }
 
 fn load_serialized_kmers(
-    path: &str,
+    bin_path: &str,
     processor: &mut KmerProcessor,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let serialized_kmer_file = File::open(path)?;
+    let serialized_kmer_file = File::open(bin_path)?;
     let mut reader = BufReader::new(serialized_kmer_file);
 
     processor.ref_kmers = bincode::decode_from_std_read(&mut reader, bincode::config::standard())?;
@@ -86,10 +98,10 @@ fn load_serialized_kmers(
 }
 
 fn get_reference_kmers(
-    path: &str,
+    ref_path: &str,
     processor: &mut KmerProcessor,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut reader = needletail::parse_fastx_file(path)?;
+    let mut reader = needletail::parse_fastx_file(ref_path)?;
 
     while let Some(record) = reader.next() {
         let record = record?;
@@ -116,7 +128,7 @@ fn serialize_kmers(
     Ok(())
 }
 
-fn process_reads_and_write_streaming(
+fn process_reads(
     reads_path: &str,
     processor: KmerProcessor,
     matched_output: &str,
@@ -134,7 +146,7 @@ fn process_reads_and_write_streaming(
 
     while let Some(record) = reader.next() {
         let record = record?;
-        let id = String::from_utf8_lossy(record.id());
+        let id = str::from_utf8(record.id())?;
         let seq = &record.seq();
 
         let is_match = processor.process_read(seq);
@@ -157,6 +169,103 @@ fn process_reads_and_write_streaming(
         "Wrote {} unmatched reads to out/unmatched.fa!",
         unmatched_count
     );
+
+    Ok(())
+}
+
+fn get_read_chunks(
+    reads_path: &str,
+    processor: KmerProcessor,
+    matched_output: &str,
+    unmatched_output: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut reader = needletail::parse_fastx_file(reads_path)?;
+    let mut chunk = Vec::new();
+    let safe_processor = Arc::from(processor);
+
+    let matched_file = File::create(matched_output)?;
+    let mut matched_writer = BufWriter::new(matched_file);
+    let mut matched_count: u32 = 0;
+
+    let unmatched_file = File::create(unmatched_output)?;
+    let mut unmatched_writer = BufWriter::new(unmatched_file);
+    let mut unmatched_count: u32 = 0;
+
+    while let Some(record) = reader.next() {
+        let record = record?;
+        let id = String::from_utf8(Vec::from(record.id()))?;
+        let seq = record.seq().into_owned();
+
+        chunk.push((id, seq));
+
+        if chunk.len() == 10_000 {
+            match process_reads_parellel(
+                chunk,
+                safe_processor.clone(),
+                &mut matched_writer,
+                &mut unmatched_writer,
+                &mut matched_count,
+                &mut unmatched_count,
+            ) {
+                Ok(()) => {}
+                Err(e) => {
+                    eprintln!("Processing reads unsuccessful: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            chunk = Vec::new();
+        }
+    }
+
+    if chunk.len() > 0 && chunk.len() < 10_000 {
+        match process_reads_parellel(
+            chunk,
+            safe_processor.clone(),
+            &mut matched_writer,
+            &mut unmatched_writer,
+            &mut matched_count,
+            &mut unmatched_count,
+        ) {
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("Processing reads unsuccessful: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    println!("Wrote {} matched reads to out/matched.fa!", matched_count);
+    println!(
+        "Wrote {} unmatched reads to out/unmatched.fa!",
+        unmatched_count
+    );
+
+    Ok(())
+}
+
+fn process_reads_parellel(
+    reads_chunk: Vec<(String, Vec<u8>)>,
+    processor: Arc<KmerProcessor>,
+    matched_writer: &mut BufWriter<File>,
+    unmatched_writer: &mut BufWriter<File>,
+    matched_count: &mut u32,
+    unmatched_count: &mut u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for (id, seq) in reads_chunk.iter() {
+        let is_match = processor.process_read(seq.as_ref());
+
+        if is_match {
+            writeln!(matched_writer, ">{}", id)?;
+            matched_writer.write_all(seq)?;
+            writeln!(matched_writer)?;
+            *matched_count += 1;
+        } else {
+            writeln!(unmatched_writer, ">{}", id)?;
+            unmatched_writer.write_all(seq)?;
+            writeln!(unmatched_writer)?;
+            *unmatched_count += 1;
+        }
+    }
 
     Ok(())
 }

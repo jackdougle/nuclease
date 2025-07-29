@@ -1,5 +1,6 @@
 use needletail::bitkmer::canonical;
 use rustc_hash::FxHashSet;
+use wide::u8x16;
 
 pub struct KmerProcessor {
     pub k: usize,
@@ -85,8 +86,4 @@ pub fn encode(seq: &[u8]) -> u64 {
         debug_assert!(val <= 0b11, "Invalid base: {}", base as char);
         (encoded << 2) | val as u64
     })
-}
-
-pub fn encode_simd(seq: &[u8]) -> u64 {
-    unimplemented!()
 }
