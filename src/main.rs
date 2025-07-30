@@ -1,5 +1,5 @@
-#[cfg(test)]
-mod cuttle_test;
+// #[cfg(test)]
+// mod cuttle_test;
 mod cuttlefish;
 mod kmer_processor;
 

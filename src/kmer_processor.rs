@@ -1,6 +1,5 @@
 use needletail::bitkmer::canonical;
 use rustc_hash::FxHashSet;
-use wide::u8x16;
 
 pub struct KmerProcessor {
     pub k: usize,

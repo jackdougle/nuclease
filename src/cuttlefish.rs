@@ -3,6 +3,7 @@ extern crate needletail;
 
 use crate::kmer_processor::KmerProcessor;
 use rayon::prelude::*;
+use std::error::Error;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::sync::Arc;
@@ -88,7 +89,7 @@ pub fn run(args: crate::Args) {
 fn load_serialized_kmers(
     bin_path: &str,
     processor: &mut KmerProcessor,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn Error>> {
     let serialized_kmer_file = File::open(bin_path)?;
     let mut reader = BufReader::new(serialized_kmer_file);
 
@@ -100,7 +101,7 @@ fn load_serialized_kmers(
 fn get_reference_kmers(
     ref_path: &str,
     processor: &mut KmerProcessor,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn Error>> {
     let mut reader = needletail::parse_fastx_file(ref_path)?;
 
     while let Some(record) = reader.next() {
@@ -111,10 +112,7 @@ fn get_reference_kmers(
     Ok(())
 }
 
-fn serialize_kmers(
-    path: &str,
-    processor: &mut KmerProcessor,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn serialize_kmers(path: &str, processor: &mut KmerProcessor) -> Result<(), Box<dyn Error>> {
     let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
 
@@ -133,7 +131,7 @@ fn process_reads(
     processor: KmerProcessor,
     matched_output: &str,
     unmatched_output: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn Error>> {
     let matched_file = File::create(matched_output)?;
     let mut matched_writer = BufWriter::new(matched_file);
     let mut matched_count = 0usize;
@@ -173,23 +171,123 @@ fn process_reads(
     Ok(())
 }
 
+// fn get_read_chunks(
+//     reads_path: &str,
+//     processor: KmerProcessor,
+//     matched_output: &str,
+//     unmatched_output: &str,
+// ) -> Result<(), Box<dyn Error>> {
+//     let mut reader = needletail::parse_fastx_file(reads_path)?;
+//     let mut chunk = Vec::new();
+//     let safe_processor = Arc::from(processor);
+
+//     let matched_file = File::create(matched_output)?;
+//     let mut matched_writer = BufWriter::new(matched_file);
+//     let mut matched_count: u32 = 0;
+
+//     let unmatched_file = File::create(unmatched_output)?;
+//     let mut unmatched_writer = BufWriter::new(unmatched_file);
+//     let mut unmatched_count: u32 = 0;
+
+//     while let Some(record) = reader.next() {
+//         let record = record?;
+//         let id = String::from_utf8(Vec::from(record.id()))?;
+//         let seq = record.seq().into_owned();
+
+//         chunk.push((id, seq));
+
+//         if chunk.len() == 10_000 {
+//             match process_reads_parellel(
+//                 chunk,
+//                 safe_processor.clone(),
+//                 &mut matched_writer,
+//                 &mut unmatched_writer,
+//                 &mut matched_count,
+//                 &mut unmatched_count,
+//             ) {
+//                 Ok(()) => {}
+//                 Err(e) => {
+//                     eprintln!("Processing reads unsuccessful: {}", e);
+//                     std::process::exit(1);
+//                 }
+//             }
+//             chunk = Vec::new();
+//         }
+//     }
+
+//     if chunk.len() > 0 && chunk.len() < 10_000 {
+//         match process_reads_parellel(
+//             chunk,
+//             safe_processor.clone(),
+//             &mut matched_writer,
+//             &mut unmatched_writer,
+//             &mut matched_count,
+//             &mut unmatched_count,
+//         ) {
+//             Ok(()) => {}
+//             Err(e) => {
+//                 eprintln!("Processing reads unsuccessful: {}", e);
+//                 std::process::exit(1);
+//             }
+//         }
+//     }
+
+//     println!("Wrote {} matched reads to out/matched.fa!", matched_count);
+//     println!(
+//         "Wrote {} unmatched reads to out/unmatched.fa!",
+//         unmatched_count
+//     );
+
+//     Ok(())
+// }
+
+// fn process_reads_parellel(
+//     reads_chunk: Vec<(String, Vec<u8>)>,
+//     processor: Arc<KmerProcessor>,
+//     matched_writer: &mut BufWriter<File>,
+//     unmatched_writer: &mut BufWriter<File>,
+//     matched_count: &mut u32,
+//     unmatched_count: &mut u32,
+// ) -> Result<(), Box<dyn Error>> {
+//     for (id, seq) in reads_chunk.iter() {
+//         let is_match = processor.process_read(seq.as_ref());
+
+//         if is_match {
+//             writeln!(matched_writer, ">{}", id)?;
+//             matched_writer.write_all(seq)?;
+//             writeln!(matched_writer)?;
+//             *matched_count += 1;
+//         } else {
+//             writeln!(unmatched_writer, ">{}", id)?;
+//             unmatched_writer.write_all(seq)?;
+//             writeln!(unmatched_writer)?;
+//             *unmatched_count += 1;
+//         }
+//     }
+
+//     Ok(())
+// }
+
+use std::sync::Mutex;
+
 fn get_read_chunks(
     reads_path: &str,
     processor: KmerProcessor,
     matched_output: &str,
     unmatched_output: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut reader = needletail::parse_fastx_file(reads_path)?;
     let mut chunk = Vec::new();
-    let safe_processor = Arc::from(processor);
 
-    let matched_file = File::create(matched_output)?;
-    let mut matched_writer = BufWriter::new(matched_file);
-    let mut matched_count: u32 = 0;
+    let processor = Arc::new(processor);
 
-    let unmatched_file = File::create(unmatched_output)?;
-    let mut unmatched_writer = BufWriter::new(unmatched_file);
-    let mut unmatched_count: u32 = 0;
+    let matched_writer = Arc::new(Mutex::new(BufWriter::new(File::create(matched_output)?)));
+    let unmatched_writer = Arc::new(Mutex::new(BufWriter::new(File::create(unmatched_output)?)));
+
+    let matched_count = Arc::new(Mutex::new(0u32));
+    let unmatched_count = Arc::new(Mutex::new(0u32));
+
+    let mut chunks: Vec<Vec<(String, Vec<u8>)>> = Vec::new();
 
     while let Some(record) = reader.next() {
         let record = record?;
@@ -199,69 +297,70 @@ fn get_read_chunks(
         chunk.push((id, seq));
 
         if chunk.len() == 10_000 {
-            match process_reads_parellel(
-                chunk,
-                safe_processor.clone(),
-                &mut matched_writer,
-                &mut unmatched_writer,
-                &mut matched_count,
-                &mut unmatched_count,
-            ) {
-                Ok(()) => {}
-                Err(e) => {
-                    eprintln!("Processing reads unsuccessful: {}", e);
-                    std::process::exit(1);
-                }
-            }
+            chunks.push(chunk);
             chunk = Vec::new();
         }
     }
 
-    if chunk.len() > 0 && chunk.len() < 10_000 {
-        match process_reads_parellel(
-            chunk,
-            safe_processor.clone(),
-            &mut matched_writer,
-            &mut unmatched_writer,
-            &mut matched_count,
-            &mut unmatched_count,
-        ) {
-            Ok(()) => {}
-            Err(e) => {
-                eprintln!("Processing reads unsuccessful: {}", e);
-                std::process::exit(1);
-            }
-        }
+    if !chunk.is_empty() {
+        chunks.push(chunk);
     }
 
-    println!("Wrote {} matched reads to out/matched.fa!", matched_count);
+    chunks.into_par_iter().try_for_each(|chunk| {
+        process_reads_parallel(
+            chunk,
+            processor.clone(),
+            matched_writer.clone(),
+            unmatched_writer.clone(),
+            matched_count.clone(),
+            unmatched_count.clone(),
+        )
+    })?;
+
     println!(
-        "Wrote {} unmatched reads to out/unmatched.fa!",
-        unmatched_count
+        "Wrote {} matched reads to {}!",
+        matched_count.lock().unwrap(),
+        matched_output
+    );
+    println!(
+        "Wrote {} unmatched reads to {}!",
+        unmatched_count.lock().unwrap(),
+        unmatched_output
     );
 
     Ok(())
 }
 
-fn process_reads_parellel(
+fn process_reads_parallel(
     reads_chunk: Vec<(String, Vec<u8>)>,
     processor: Arc<KmerProcessor>,
-    matched_writer: &mut BufWriter<File>,
-    unmatched_writer: &mut BufWriter<File>,
-    matched_count: &mut u32,
-    unmatched_count: &mut u32,
-) -> Result<(), Box<dyn std::error::Error>> {
-    for (id, seq) in reads_chunk.iter() {
-        let is_match = processor.process_read(seq.as_ref());
+    matched_writer: Arc<Mutex<BufWriter<File>>>,
+    unmatched_writer: Arc<Mutex<BufWriter<File>>>,
+    matched_count: Arc<Mutex<u32>>,
+    unmatched_count: Arc<Mutex<u32>>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let results: Vec<(bool, String, Vec<u8>)> = reads_chunk
+        .into_par_iter()
+        .map(|(id, seq)| {
+            let is_match = processor.process_read(&seq);
+            (is_match, id, seq)
+        })
+        .collect();
 
+    let mut matched_writer = matched_writer.lock().unwrap();
+    let mut unmatched_writer = unmatched_writer.lock().unwrap();
+    let mut matched_count = matched_count.lock().unwrap();
+    let mut unmatched_count = unmatched_count.lock().unwrap();
+
+    for (is_match, id, seq) in results {
         if is_match {
             writeln!(matched_writer, ">{}", id)?;
-            matched_writer.write_all(seq)?;
+            matched_writer.write_all(&seq)?;
             writeln!(matched_writer)?;
             *matched_count += 1;
         } else {
             writeln!(unmatched_writer, ">{}", id)?;
-            unmatched_writer.write_all(seq)?;
+            unmatched_writer.write_all(&seq)?;
             writeln!(unmatched_writer)?;
             *unmatched_count += 1;
         }
