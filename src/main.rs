@@ -1,7 +1,7 @@
-// #[cfg(test)]
-// mod cuttle_test;
-mod cuttlefish;
+mod duk;
 mod kmer_processor;
+// #[cfg(test)]
+// mod test;
 
 use clap::Parser;
 
@@ -15,22 +15,22 @@ struct Args {
 
     /// Threshold for k-mer matches
     #[arg(short, long, default_value_t = 1)]
-    threshold: u8,
+    num_hits: u8,
 
-    /// Use canonical k-mers
-    #[arg(short, long, default_value_t = true)]
-    canonical: bool,
+    /// Amount of threads to use
+    #[arg(short, long, default_value_t = 8)]
+    threads: u8,
 
     /// Reference file path
     #[arg(short, long, default_value_t = String::from("in/10k_150.fa"))]
-    reference: String,
+    ref_path: String,
 
     /// Reads file path
-    #[arg(short, long, default_value_t = String::from("in/100k_150.fq"))]
-    query: String,
+    #[arg(short, long, default_value_t = String::from("big/1m_150.fq"))]
+    in_path: String,
 
     #[arg(short, long, default_value_t = String::from("in/serialized_kmers.bin"))]
-    serialized_kmers_filename: String,
+    bin_kmers_path: String,
 
     #[arg(short, long, default_value_t = String::from("out/matched.fa"))]
     matched_path: String,
@@ -41,5 +41,5 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    cuttlefish::run(args);
+    duk::run(args);
 }
