@@ -28,10 +28,15 @@ pub fn run(args: crate::Args) {
     let outm_path = &args.matched_path;
     let out_path = &args.unmatched_path;
     let bin_kmers_path = &args.bin_kmers_path;
+    let _interleaved = args.x;
 
     let mut kmer_processor = KmerProcessor::new(k, threshold);
 
     println!("Executing Rust-Duk [{:#?}]\nVersion 1.0.0", args);
+    println!(
+        "Indexing k-mer table:\t{:.3}",
+        start_time.elapsed().as_secs_f32()
+    );
 
     match load_serialized_kmers(bin_kmers_path, &mut kmer_processor) {
         Ok(()) => {
@@ -182,7 +187,7 @@ fn process_reads_crossbeam(
     let processor = Arc::new(processor);
 
     let (tx, rx) = channel(); // for processed outputs
-    let chunk_size = 10_000;
+    let chunk_size = 1_000;
     let mut chunk = Vec::with_capacity(chunk_size);
 
     while let Some(record) = reader.next() {
@@ -222,18 +227,19 @@ fn process_reads_crossbeam(
     let mut ubase_count = 0;
 
     for (matched, unmatched) in rx {
+        mseq_count += matched.len() as u32;
         for (id, seq) in matched {
             writeln!(matched_writer, ">{}", id)?;
             matched_writer.write_all(&seq)?;
             writeln!(matched_writer)?;
-            mseq_count += 1;
             mbase_count += seq.len() as u32;
         }
+
+        useq_count += unmatched.len() as u32;
         for (id, seq) in unmatched {
             writeln!(unmatched_writer, ">{}", id)?;
             unmatched_writer.write_all(&seq)?;
             writeln!(unmatched_writer)?;
-            useq_count += 1;
             ubase_count += seq.len() as u32;
         }
     }

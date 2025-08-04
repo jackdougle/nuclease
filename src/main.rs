@@ -37,6 +37,9 @@ struct Args {
 
     #[arg(short, long, default_value_t = String::from("out/unmatched.fa"))]
     unmatched_path: String,
+
+    #[arg(short, long, default_value_t = false)]
+    x: bool,
 }
 
 fn main() {
