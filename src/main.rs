@@ -26,7 +26,7 @@ struct Args {
     ref_path: String,
 
     /// Reads file path
-    #[arg(short, long, default_value_t = String::from("big/1m_150.fq"))]
+    #[arg(short, long, default_value_t = String::from("in/1m_150.fq"))]
     in_path: String,
 
     #[arg(short, long, default_value_t = String::from("in/serialized_kmers.bin"))]

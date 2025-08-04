@@ -2,13 +2,11 @@ extern crate bincode;
 extern crate needletail;
 
 use crate::kmer_processor::KmerProcessor;
-use rand::seq::index;
-use rayon::prelude::*;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
+use std::sync::Arc;
 use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 // TODO:

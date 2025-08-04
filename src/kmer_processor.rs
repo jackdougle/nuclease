@@ -1,6 +1,5 @@
 use needletail::bitkmer::canonical;
 use rustc_hash::FxHashSet;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Default)]
 pub struct KmerProcessor {
@@ -86,26 +85,4 @@ pub fn encode(seq: &[u8]) -> u64 {
         debug_assert!(val <= 0b11, "Invalid base: {}", base as char);
         (encoded << 2) | val as u64
     })
-}
-
-pub struct RecordRef {
-    pub id: Arc<str>,
-    pub range: std::ops::Range<usize>,
-}
-
-impl RecordRef {
-    pub fn new(id: Arc<str>, range: std::ops::Range<usize>) -> Self {
-        RecordRef { id, range }
-    }
-}
-
-pub struct Chunk {
-    pub buffer: Vec<u8>,
-    pub reads: Vec<RecordRef>,
-}
-
-impl Chunk {
-    pub fn new(buffer: Vec<u8>, reads: Vec<RecordRef>) -> Self {
-        Chunk { buffer, reads }
-    }
 }
