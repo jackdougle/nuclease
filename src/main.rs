@@ -4,6 +4,7 @@ mod kmer_processor;
 // mod test;
 
 use clap::Parser;
+use std::time::Instant;
 
 /// K-mer matching tool for sequence analysis
 #[derive(Parser, Debug)]
@@ -39,10 +40,11 @@ struct Args {
     unmatched_path: String,
 
     #[arg(short, long, default_value_t = false)]
-    x: bool,
+    paired_reads: bool,
 }
 
 fn main() {
+    let start_time = Instant::now();
     let args = Args::parse();
-    duk::run(args);
+    duk::run(args, start_time);
 }
