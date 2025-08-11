@@ -1,5 +1,8 @@
-/target
-/ref
+/.vscode
+/in
+/misc
 /out
-/in/1m_150.fq
-/in/24m_150.fq
+/ref
+/target
+/profile.json.gz
+/Cargo.lock
