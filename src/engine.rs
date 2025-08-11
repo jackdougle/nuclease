@@ -1,39 +1,46 @@
-extern crate bincode;
-extern crate needletail;
-
 use crate::kmer_processor::KmerProcessor;
+use bincode::{config, decode_from_std_read, encode_into_std_write};
+use needletail::parse_fastx_file;
 use rayon::prelude::*;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
+use std::mem::take;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::Instant;
 
 // TODO:
-// - Improve multi-threading
 // - Add paired reads support
-// - Check out SIMD encoding
-// - Check Rust-Bio for all kmer/hashing operations
 // - Add memory maximum (argument)
 // - Add # of threads to use (argument)
+// - Do documentation (vvv)
+// - Github repo: follow crates.io syntax
+// - Try to upload crate to crates.io and docs.rs
+// - Consider pull request to Rust-Bio (still going?)
 
-pub fn run(args: crate::Args, start_time: Instant) {
+pub fn run(args: crate::Args) {
+    let start_time = Instant::now();
+
     let k = args.k;
-    let threshold = args.num_hits;
+    let min_hits = args.minhits;
     let _num_threads = args.threads;
-    let ref_path = &args.ref_path;
-    let in_path = &args.in_path;
-    let outm_path = &args.matched_path;
-    let out_path = &args.unmatched_path;
-    let bin_kmers_path = &args.bin_kmers_path;
-    let _paired_reads = args.paired_reads;
+    let _max_memory = args.maxmem;
+    let ref_path = &args.r#ref;
+    let in_path = &args.r#in;
+    let _in2_path = &args.in2;
+    let outm_path = &args.outu;
+    let outu_path = &args.outm;
+    let _outm2_path = &args.outm2;
+    let _outu2_path = &args.outu2;
+    let bin_kmers_path = &args.binref;
+    let _interleaved = args.interleaved;
 
-    let mut kmer_processor = KmerProcessor::new(k, threshold);
+    let mut kmer_processor = KmerProcessor::new(k, min_hits);
 
-    println!("Executing Rust-Duk [{:#?}]\nVersion 1.0.0", args);
+    println!("Executing Rust-Duk [{:?}]\nVersion 1.0.0", args);
     println!(
         "Indexing k-mer table:\t{:.3}",
         start_time.elapsed().as_secs_f32()
@@ -76,7 +83,12 @@ pub fn run(args: crate::Args, start_time: Instant) {
     println!("Indexing time:\t\t{:.3} seconds\n", indexing_time);
     println!("Processing reads from {}", in_path);
 
-    match process_reads(String::from(in_path), kmer_processor, &outm_path, &out_path) {
+    match process_reads(
+        String::from(in_path),
+        kmer_processor,
+        &outm_path,
+        &outu_path,
+    ) {
         Ok((mseq_count, mbase_count, useq_count, ubase_count)) => {
             let read_count = mseq_count + useq_count;
             let matched_percent = (mseq_count as f32 / read_count as f32) * 100.0;
@@ -104,8 +116,15 @@ pub fn run(args: crate::Args, start_time: Instant) {
                 start_time.elapsed().as_secs_f32()
             );
 
-            if read_count >= 10_000 {
-                let read_count = read_count as f32 / 1_000 as f32;
+            if read_count >= 1_000_000 {
+                let read_count = read_count as f32 / 1_000_000.0;
+                println!(
+                    "Reads Processed:\t{:.2}m reads\t\t\t{:.2}m reads/sec",
+                    read_count,
+                    read_count / end_time
+                );
+            } else if read_count >= 10_000 {
+                let read_count = read_count as f32 / 1_000.0;
                 println!(
                     "Reads Processed:\t{:.2}k reads\t\t\t{:.2}k reads/sec",
                     read_count,
@@ -119,7 +138,7 @@ pub fn run(args: crate::Args, start_time: Instant) {
                 );
             }
 
-            if base_count >= 10_000_000 {
+            if base_count >= 1_000_000 {
                 let base_count = base_count as f32 / 1_000_000.0;
                 println!(
                     "Bases Processed:\t{:.2}m bases\t\t\t{:.2}m bases/sec",
@@ -148,7 +167,7 @@ fn load_serialized_kmers(
     let bin_kmers_file = File::open(bin_kmers_path)?;
     let mut reader = BufReader::new(bin_kmers_file);
 
-    processor.ref_kmers = bincode::decode_from_std_read(&mut reader, bincode::config::standard())?;
+    processor.ref_kmers = decode_from_std_read(&mut reader, config::standard())?;
 
     Ok(())
 }
@@ -157,7 +176,7 @@ fn get_reference_kmers(
     ref_path: &str,
     processor: &mut KmerProcessor,
 ) -> Result<(), Box<dyn Error>> {
-    let mut reader = needletail::parse_fastx_file(ref_path)?;
+    let mut reader = parse_fastx_file(ref_path)?;
 
     while let Some(record) = reader.next() {
         let record = record?;
@@ -171,11 +190,7 @@ fn serialize_kmers(path: &str, processor: &mut KmerProcessor) -> Result<(), Box<
     let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
 
-    bincode::encode_into_std_write(
-        &processor.ref_kmers,
-        &mut writer,
-        bincode::config::standard(),
-    )?;
+    encode_into_std_write(&processor.ref_kmers, &mut writer, config::standard())?;
 
     println!("Saved binary-encoded k-mers to index file: {}", path);
     Ok(())
@@ -189,15 +204,15 @@ pub fn process_reads(
 ) -> Result<(u32, u32, u32, u32), Box<dyn Error + Send + Sync>> {
     let processor = Arc::new(processor);
     let (sender, receiver): (
-        mpsc::Sender<Vec<(bool, Vec<u8>, Vec<u8>)>>,
+        Sender<Vec<(bool, Vec<u8>, Vec<u8>)>>,
         Receiver<Vec<(bool, Vec<u8>, Vec<u8>)>>,
-    ) = mpsc::channel();
+    ) = channel();
 
     // Reader thread
-    let sender_clone = sender.clone();
+    let sender2 = sender.clone();
     let reader_thread = thread::spawn(move || -> Result<(), Box<dyn Error + Send + Sync>> {
-        let mut reader = needletail::parse_fastx_file(reads_path)?;
-        let chunk_size = 10_000; // Larger chunks for better throughput
+        let mut reader = parse_fastx_file(reads_path)?;
+        let chunk_size = 2_000;
         let mut chunk = Vec::with_capacity(chunk_size);
 
         while let Some(record) = reader.next() {
@@ -206,8 +221,8 @@ pub fn process_reads(
 
             if chunk.len() == chunk_size {
                 let processor = processor.clone();
-                let sender = sender_clone.clone();
-                let local_chunk = std::mem::take(&mut chunk);
+                let sender = sender2.clone();
+                let local_chunk = take(&mut chunk);
 
                 // Process chunk in parallel
                 rayon::spawn(move || {
@@ -234,19 +249,16 @@ pub fn process_reads(
                 })
                 .collect();
 
-            let _ = sender_clone.send(processed);
+            let _ = sender2.send(processed);
         }
 
         Ok(())
     });
 
-    drop(sender); // Close sender
+    drop(sender);
 
-    // Writer thread
-    let mut matched_writer =
-        BufWriter::with_capacity(8 * 1024 * 1024, File::create(matched_output)?);
-    let mut unmatched_writer =
-        BufWriter::with_capacity(8 * 1024 * 1024, File::create(unmatched_output)?);
+    let mut matched_writer = BufWriter::with_capacity(4_000_000, File::create(matched_output)?);
+    let mut unmatched_writer = BufWriter::with_capacity(4_000_000, File::create(unmatched_output)?);
 
     let matched_count = Arc::new(AtomicU32::new(0));
     let matched_bases = Arc::new(AtomicU32::new(0));

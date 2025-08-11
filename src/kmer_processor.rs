@@ -1,7 +1,6 @@
 use needletail::bitkmer::canonical;
 use rustc_hash::FxHashSet;
 
-#[derive(Debug, Clone, Default)]
 pub struct KmerProcessor {
     pub k: usize,
     pub threshold: u8,
@@ -71,8 +70,8 @@ impl KmerProcessor {
 
 #[inline(always)]
 pub fn encode(seq: &[u8]) -> u64 {
-    const BASE_TABLE: [u8; 256] = {
-        let mut bases = [0u8; 256];
+    static BASE_TABLE: [u8; 85] = {
+        let mut bases = [0u8; 85];
         bases[b'A' as usize] = 0b00;
         bases[b'C' as usize] = 0b01;
         bases[b'G' as usize] = 0b10;

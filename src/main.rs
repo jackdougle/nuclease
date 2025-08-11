@@ -1,50 +1,59 @@
-mod duk;
+mod engine;
 mod kmer_processor;
-// #[cfg(test)]
-// mod test;
+#[cfg(test)]
+mod test;
 
 use clap::Parser;
-use std::time::Instant;
 
-/// K-mer matching tool for sequence analysis
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
     /// K-mer size
-    #[arg(short, long, default_value_t = 21)]
+    #[arg(short, long, default_value_t = 0)]
     k: usize,
 
     /// Threshold for k-mer matches
-    #[arg(short, long, default_value_t = 1)]
-    num_hits: u8,
+    #[arg(short, long, default_value_t = 0)]
+    minhits: u8,
 
     /// Amount of threads to use
-    #[arg(short, long, default_value_t = 8)]
+    #[arg(short, long, default_value_t = 0)]
     threads: u8,
 
+    /// Memory cap
+    #[arg(short, long, default_value_t = 0)]
+    maxmem: u32,
+
     /// Reference file path
-    #[arg(short, long, default_value_t = String::from("in/10k_150.fa"))]
-    ref_path: String,
+    #[arg(short, long, default_value_t = String::new())]
+    r#ref: String,
 
-    /// Reads file path
-    #[arg(short, long, default_value_t = String::from("in/1m_150.fq"))]
-    in_path: String,
+    #[arg(short, long, default_value_t = String::new())]
+    r#in: String,
 
-    #[arg(short, long, default_value_t = String::from("in/serialized_kmers.bin"))]
-    bin_kmers_path: String,
+    #[arg(short, long, default_value_t = String::new())]
+    in2: String,
 
-    #[arg(short, long, default_value_t = String::from("out/matched.fa"))]
-    matched_path: String,
+    #[arg(short, long, default_value_t = String::new())]
+    binref: String,
 
-    #[arg(short, long, default_value_t = String::from("out/unmatched.fa"))]
-    unmatched_path: String,
+    #[arg(short, long, default_value_t = String::new())]
+    outm: String,
+
+    #[arg(short, long, default_value_t = String::new())]
+    outu: String,
+
+    #[arg(short, long, default_value_t = String::new())]
+    outm2: String,
+
+    #[arg(short, long, default_value_t = String::new())]
+    outu2: String,
 
     #[arg(short, long, default_value_t = false)]
-    paired_reads: bool,
+    interleaved: bool,
 }
 
 fn main() {
-    let start_time = Instant::now();
     let args = Args::parse();
-    duk::run(args, start_time);
+    engine::run(args);
 }
