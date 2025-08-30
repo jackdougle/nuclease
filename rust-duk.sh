@@ -21,4 +21,6 @@ Please contact jack.gdouglass@gmail.com if you encounter any problems.
 
 pushd . > /dev/null
 
+echo "$@"
+
 rust-duk "$@"

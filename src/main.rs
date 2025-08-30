@@ -1,4 +1,4 @@
-mod engine;
+mod duk;
 mod kmer_processor;
 #[cfg(test)]
 mod test;
@@ -49,11 +49,11 @@ struct Args {
     #[arg(short, long, default_value_t = String::new())]
     outu2: String,
 
-    #[arg(short, long, default_value_t = false)]
-    interleaved: bool,
+    #[arg(long)]
+    interinput: bool,
 }
 
 fn main() {
     let args = Args::parse();
-    engine::run(args);
+    duk::run(args);
 }

@@ -54,6 +54,7 @@ impl KmerProcessor {
             } else {
                 kmer = ((kmer << 2) | encode(&[read_seq[i + self.k - 1]])) & self.bit_cap;
             }
+
             if self
                 .ref_kmers
                 .contains(&canonical((kmer, self.k as u8)).0.0)
@@ -64,6 +65,7 @@ impl KmerProcessor {
                 }
             }
         }
+
         false
     }
 }
