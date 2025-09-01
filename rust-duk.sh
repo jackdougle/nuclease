@@ -14,7 +14,7 @@ Output Parameters:
 
 Memory Parameters:
 
-Function and usage documentation at https://docs.rs/rust-duk and ./README.md.
+Function and usage documentation at ./README.md
 Please contact jack.gdouglass@gmail.com if you encounter any problems.
 "
 }

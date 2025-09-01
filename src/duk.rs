@@ -13,8 +13,8 @@ use std::thread;
 use std::time::Instant;
 
 // TODO:
-// - Add paired reads support
 // - Add k-mer length metadata to serialized file and error checking
+// - Add piping from stdin and piping to stdout
 // - Add memory maximum (argument)
 // - Add # of threads to use (argument)
 // - Do documentation (vvv)
@@ -213,6 +213,10 @@ fn detect_mode(
     interleaved_input: bool,
 ) -> ProcessMode {
     if !reads2_path.is_empty() {
+        assert!(
+            !interleaved_input,
+            "Please disable the --interleaved flag if providing 2 input files"
+        );
         if matched2_path.is_empty() && unmatched2_path.is_empty() {
             println!(
                 "Forcing interleaved output because paired input was specified for single output files"
@@ -280,7 +284,6 @@ fn process_reads(
         Receiver<Vec<(bool, Vec<u8>, Vec<u8>)>>,
     ) = channel();
 
-    // Reader thread
     let sender2 = sender.clone();
     let reader_thread = thread::spawn(move || -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut reader = parse_fastx_file(reads_path)?;
@@ -288,10 +291,7 @@ fn process_reads(
         const CHUNK_SIZE: usize = 2_000;
         let mut chunk = Vec::with_capacity(CHUNK_SIZE);
 
-        if process_mode == ProcessMode::Unpaired
-            || process_mode == ProcessMode::Interleaved
-            || process_mode == ProcessMode::InterInPairedOut
-        {
+        if process_mode == ProcessMode::Unpaired {
             while let Some(record) = reader.next() {
                 let record = record?;
                 chunk.push((record.id().to_vec(), record.seq().to_vec()));
@@ -301,7 +301,6 @@ fn process_reads(
                     let sender = sender2.clone();
                     let local_chunk = take(&mut chunk);
 
-                    // Process chunk in parallel
                     rayon::spawn(move || {
                         let processed: Vec<(bool, Vec<u8>, Vec<u8>)> = local_chunk
                             .into_par_iter()
@@ -327,9 +326,57 @@ fn process_reads(
 
                 let _ = sender2.send(processed);
             }
-        }
+        } else if process_mode == ProcessMode::Interleaved
+            || process_mode == ProcessMode::InterInPairedOut
+        {
+            while let Some(record) = reader.next() {
+                let record = record?;
+                chunk.push((record.id().to_vec(), record.seq().to_vec()));
 
-        if process_mode == ProcessMode::PairedInInterOut || process_mode == ProcessMode::Paired {
+                if chunk.len() == CHUNK_SIZE {
+                    let processor = processor.clone();
+                    let sender = sender2.clone();
+                    let local_chunk = take(&mut chunk);
+
+                    // Process chunk in parallel
+                    rayon::spawn(move || {
+                        let processed: Vec<(bool, Vec<u8>, Vec<u8>)> = local_chunk
+                            .into_par_iter()
+                            .enumerate()
+                            .map(|(i, (id, seq))| {
+                                let has_match = if i % 2 == 1 {
+                                    false
+                                } else {
+                                    processor.process_read(&seq)
+                                };
+                                (has_match, id, seq)
+                            })
+                            .collect();
+
+                        let _ = sender.send(processed);
+                    });
+                }
+            }
+
+            if !chunk.is_empty() {
+                let processed: Vec<(bool, Vec<u8>, Vec<u8>)> = chunk
+                    .into_par_iter()
+                    .enumerate()
+                    .map(|(i, (id, seq))| {
+                        let has_match = if i % 2 == 1 {
+                            false
+                        } else {
+                            processor.process_read(&seq)
+                        };
+                        (has_match, id, seq)
+                    })
+                    .collect();
+
+                let _ = sender2.send(processed);
+            }
+        } else if process_mode == ProcessMode::PairedInInterOut
+            || process_mode == ProcessMode::Paired
+        {
             let mut reader2 = parse_fastx_file(reads2_path)?;
             let mut chunk = Vec::with_capacity(CHUNK_SIZE);
             while let (Some(record1), Some(record2)) = (reader.next(), reader2.next()) {
@@ -343,13 +390,16 @@ fn process_reads(
                     let processor = processor.clone();
                     let sender = sender2.clone();
                     let local_chunk = take(&mut chunk);
-
                     rayon::spawn(move || {
                         let processed: Vec<(bool, Vec<u8>, Vec<u8>)> = local_chunk
                             .into_par_iter()
-                            .map(|(id, seq)| {
-                                let has_match = processor.process_read(&seq);
-                                // decide logic: both must match? either?
+                            .enumerate()
+                            .map(|(i, (id, seq))| {
+                                let has_match = if i % 2 == 1 {
+                                    false
+                                } else {
+                                    processor.process_read(&seq)
+                                };
                                 (has_match, id, seq)
                             })
                             .collect();
@@ -362,8 +412,13 @@ fn process_reads(
             if !chunk.is_empty() {
                 let processed: Vec<(bool, Vec<u8>, Vec<u8>)> = chunk
                     .into_par_iter()
-                    .map(|(id, seq)| {
-                        let has_match = processor.process_read(&seq);
+                    .enumerate()
+                    .map(|(i, (id, seq))| {
+                        let has_match = if i % 2 == 1 {
+                            false
+                        } else {
+                            processor.process_read(&seq)
+                        };
                         (has_match, id, seq)
                     })
                     .collect();
@@ -414,8 +469,7 @@ fn process_reads(
     {
         for batch in receiver {
             for i in (0..batch.len() - 1).step_by(2) {
-                let has_match = batch[i].0 || batch[i + 1].0;
-                if has_match {
+                if batch[i].0 {
                     matched_writer.write_all(b">")?;
                     matched_writer.write_all(&batch[i].1)?;
                     matched_writer.write_all(b"\n")?;
@@ -454,8 +508,7 @@ fn process_reads(
 
         for batch in receiver {
             for i in (0..batch.len() - 1).step_by(2) {
-                let has_match = batch[i].0 || batch[i + 1].0;
-                if has_match {
+                if batch[i].0 {
                     matched_writer.write_all(b">")?;
                     matched_writer.write_all(&batch[i].1)?;
                     matched_writer.write_all(b"\n")?;
