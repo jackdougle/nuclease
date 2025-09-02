@@ -36,7 +36,6 @@ pub fn run(args: crate::Args) {
     let _outm2_path = &args.outm2;
     let _outu2_path = &args.outu2;
     let bin_kmers_path = &args.binref;
-    let _interleaved = args.interleaved;
 
     let mut kmer_processor = KmerProcessor::new(k, min_hits);
 

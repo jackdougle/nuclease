@@ -100,7 +100,11 @@ pub fn run(args: crate::Args) {
             let end_time = start_time.elapsed().as_secs_f32();
             println!("Processing time:\t{:.3} seconds", end_time - indexing_time);
 
-            println!("\nInput:\t\t\t{} reads", read_count);
+            println!(
+                "\nInput:\t\t\t{} reads\t\t\t{} bases",
+                read_count,
+                mbase_count + ubase_count
+            );
             println!(
                 "Matches:\t\t{} reads ({:.2}%)   \t\t{} bases ({:.2}%)",
                 mseq_count, matched_percent, mbase_count, mbase_percent
@@ -342,13 +346,8 @@ fn process_reads(
                     rayon::spawn(move || {
                         let processed: Vec<(bool, Vec<u8>, Vec<u8>)> = local_chunk
                             .into_par_iter()
-                            .enumerate()
-                            .map(|(i, (id, seq))| {
-                                let has_match = if i % 2 == 1 {
-                                    false
-                                } else {
-                                    processor.process_read(&seq)
-                                };
+                            .map(|(id, seq)| {
+                                let has_match = processor.process_read(&seq);
                                 (has_match, id, seq)
                             })
                             .collect();
@@ -361,13 +360,8 @@ fn process_reads(
             if !chunk.is_empty() {
                 let processed: Vec<(bool, Vec<u8>, Vec<u8>)> = chunk
                     .into_par_iter()
-                    .enumerate()
-                    .map(|(i, (id, seq))| {
-                        let has_match = if i % 2 == 1 {
-                            false
-                        } else {
-                            processor.process_read(&seq)
-                        };
+                    .map(|(id, seq)| {
+                        let has_match = processor.process_read(&seq);
                         (has_match, id, seq)
                     })
                     .collect();
@@ -393,13 +387,8 @@ fn process_reads(
                     rayon::spawn(move || {
                         let processed: Vec<(bool, Vec<u8>, Vec<u8>)> = local_chunk
                             .into_par_iter()
-                            .enumerate()
-                            .map(|(i, (id, seq))| {
-                                let has_match = if i % 2 == 1 {
-                                    false
-                                } else {
-                                    processor.process_read(&seq)
-                                };
+                            .map(|(id, seq)| {
+                                let has_match = processor.process_read(&seq);
                                 (has_match, id, seq)
                             })
                             .collect();
@@ -412,13 +401,8 @@ fn process_reads(
             if !chunk.is_empty() {
                 let processed: Vec<(bool, Vec<u8>, Vec<u8>)> = chunk
                     .into_par_iter()
-                    .enumerate()
-                    .map(|(i, (id, seq))| {
-                        let has_match = if i % 2 == 1 {
-                            false
-                        } else {
-                            processor.process_read(&seq)
-                        };
+                    .map(|(id, seq)| {
+                        let has_match = processor.process_read(&seq);
                         (has_match, id, seq)
                     })
                     .collect();
@@ -469,7 +453,9 @@ fn process_reads(
     {
         for batch in receiver {
             for i in (0..batch.len() - 1).step_by(2) {
-                if batch[i].0 {
+                let has_match = batch[i].0 || batch[i + 1].0;
+
+                if has_match {
                     matched_writer.write_all(b">")?;
                     matched_writer.write_all(&batch[i].1)?;
                     matched_writer.write_all(b"\n")?;
@@ -482,8 +468,8 @@ fn process_reads(
                     matched_writer.write_all(&batch[i + 1].2)?;
                     matched_writer.write_all(b"\n")?;
 
-                    matched_count.fetch_add(1, Ordering::Relaxed);
-                    matched_bases.fetch_add(batch[i].2.len() as u32, Ordering::Relaxed);
+                    matched_count.fetch_add(2, Ordering::Relaxed);
+                    matched_bases.fetch_add(batch[i].2.len() as u32 * 2, Ordering::Relaxed);
                 } else {
                     unmatched_writer.write_all(b">")?;
                     unmatched_writer.write_all(&batch[i].1)?;
@@ -497,8 +483,8 @@ fn process_reads(
                     unmatched_writer.write_all(&batch[i + 1].2)?;
                     unmatched_writer.write_all(b"\n")?;
 
-                    unmatched_count.fetch_add(1, Ordering::Relaxed);
-                    unmatched_bases.fetch_add(batch[i].2.len() as u32, Ordering::Relaxed);
+                    unmatched_count.fetch_add(2, Ordering::Relaxed);
+                    unmatched_bases.fetch_add(batch[i].2.len() as u32 * 2, Ordering::Relaxed);
                 }
             }
         }
@@ -508,7 +494,7 @@ fn process_reads(
 
         for batch in receiver {
             for i in (0..batch.len() - 1).step_by(2) {
-                if batch[i].0 {
+                if batch[i].0 || batch[i + 1].0 {
                     matched_writer.write_all(b">")?;
                     matched_writer.write_all(&batch[i].1)?;
                     matched_writer.write_all(b"\n")?;
@@ -521,8 +507,8 @@ fn process_reads(
                     matched2_writer.write_all(&batch[i + 1].2)?;
                     matched2_writer.write_all(b"\n")?;
 
-                    matched_count.fetch_add(1, Ordering::Relaxed);
-                    matched_bases.fetch_add(batch[i].2.len() as u32, Ordering::Relaxed);
+                    matched_count.fetch_add(2, Ordering::Relaxed);
+                    matched_bases.fetch_add(batch[i].2.len() as u32 * 2, Ordering::Relaxed);
                 } else {
                     unmatched_writer.write_all(b">")?;
                     unmatched_writer.write_all(&batch[i].1)?;
@@ -536,8 +522,8 @@ fn process_reads(
                     unmatched2_writer.write_all(&batch[i + 1].2)?;
                     unmatched2_writer.write_all(b"\n")?;
 
-                    unmatched_count.fetch_add(1, Ordering::Relaxed);
-                    unmatched_bases.fetch_add(batch[i].2.len() as u32, Ordering::Relaxed);
+                    unmatched_count.fetch_add(2, Ordering::Relaxed);
+                    unmatched_bases.fetch_add(batch[i].2.len() as u32 * 2, Ordering::Relaxed);
                 }
             }
         }
