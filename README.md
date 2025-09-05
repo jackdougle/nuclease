@@ -102,7 +102,7 @@ Output files support either FASTA or FASTQ format.
 Example output:
 
 ```
-Indexing time:		    0.040 seconds
+Indexing time:        0.040 seconds
 
 Processing reads from reads.fq using 14 threads
 Input and output is processed as interleaved
