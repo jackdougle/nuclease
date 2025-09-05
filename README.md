@@ -1,7 +1,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 # **Rust-DUK**  
-A high-performance Rust tool for filtering sequencing reads based on reference k-mers, inspired by [BBDuk](https://jgi.doe.gov/data-and-tools/bbtools/bb-tools-user-guide/bbduk-guide/) by Brian Bushnell. Provides performant and memory-efficient read processing with support for both paired and unpaired FASTA/FASTQ files, with multiple files or interleaved format.  
+A high-performance Rust tool for filtering sequencing reads based on reference k-mers. I
+Inspired by [BBDuk](https://archive.jgi.doe.gov/data-and-tools/software-tools/bbtools/bb-tools-user-guide/bbduk-guide/) by Brian Bushnell. Provides performant and memory-efficient read processing with support for both paired and unpaired FASTA/FASTQ files, with multiple files or interleaved format.  
 
 ---
 
@@ -120,10 +121,9 @@ Bases Processed:      150.00m bases             1000.00m bases/sec
 ---
 
 ## **Performance Tuning**
-
 | **Parameter**        | **Default**                    | **Notes**                           |
 |----------------------|--------------------------------|-------------------------------------|
-| Threads              | Number of logical threads      | Adjust with `--threads <int>`       |
+| Threads              | Number of available threads    | Adjust with `--threads <int>`       |
 | Max memory           | 85% of system memory           | Adjust with `--maxmem <String>`     |
 | Chunk size           | 10,000 reads                   | Modify in source code               |
 | Serialization format | [Bincode](https://docs.rs/bincode/) Standard | Modify in source code |
@@ -198,12 +198,10 @@ This project is licensed under the MIT License, see the [LICENSE](LICENSE) file 
 ## **Crates Used**
 
 - [Needletail](https://github.com/onecodex/needletail) — FASTA/FASTQ file reading and parsing and bitkmer operations
-- [Bincode](https://sr.ht/~stygianentity/bincode/) — K-mer serialization/deserialization
-- [Rayon](https://github.com/rayon-rs/rayon) — multithreaded processing
+- [Bincode](https://sr.ht/~stygianentity/bincode/) — K-mer hashset serialization/deserialization
+- [Rayon](https://github.com/rayon-rs/rayon) — Multithreading
 - [Rustc-Hash](https://github.com/rust-lang/rustc-hash) — FxHashset for k-mer storing and comparison
-- [Clap](https://github.com/clap-rs/clap) — command line interface
+- [Clap](https://github.com/clap-rs/clap) — CLI
 - [Num-Cpus](https://github.com/seanmonstar/num_cpus) — detection of available CPU cores
 - [Sysinfo](https://github.com/GuillaumeGomez/sysinfo) — system memory and resource information
 - [Bytesize](https://github.com/tailhook/bytesize) — human-readable byte size formatting
-
-- Inspired by [BBDuk](https://jgi.doe.gov/data-and-tools/bbtools/bb-tools-user-guide/bbduk-guide/) from the BBTools suite of bioinformatics tools
