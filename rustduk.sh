@@ -3,7 +3,7 @@
 intro() {
 echo "
 Written by Jack Douglass
-Last modified September 1, 2025
+Last modified September 5, 2025
 
 Purpose: 
 
@@ -36,11 +36,11 @@ Memory & Performance Parameters:
     --maxmem auto       Maximum memory to use. Program will use ~87.5% of available
                         memory by default. '--maxmem 5G' will specify 5 gigabytes,
                         '--maxmem 200M' will specify 200 megabytes.
-    --interinput        Treat input as interleaved paired-end reads, omit flag for
+    --interleaved       Treat input as interleaved paired-end reads, omit flag for
                         unpaired reads.
 
 Function and usage documentation at ./README.md
-Contact jack.gdouglass@gmail.com for any issues encountered.
+Contact jack.gdouglass@gmail.com for any questions or issues encountered.
 "
 }
 
