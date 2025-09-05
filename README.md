@@ -1,34 +1,49 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-# **Rust-DUK**  
-A high-performance Rust tool for filtering sequencing reads based on reference k-mers. I
+# **RustDUK**  
+A high-performance Rust tool for filtering sequencing reads based on reference k-mers.
 Inspired by [BBDuk](https://archive.jgi.doe.gov/data-and-tools/software-tools/bbtools/bb-tools-user-guide/bbduk-guide/) by Brian Bushnell. Provides performant and memory-efficient read processing with support for both paired and unpaired FASTA/FASTQ files, with multiple files or interleaved format.  
 
 ---
 
-## **Features**
+## **Features and Default Behavior**
 
 - **K-mer based read filtering**:  
   - Reads are compared to reference sequences by matching k-mers.
   - If a read sequence has at least x k-mers also found in reference dataset, it is a match
   - x is 1 by default, changed with `--minhits <int>`
+
 - **Paired reads support**:  
   - Paired inputs and outputs can be specified by adding more input/output files
   - Interleaved inputs or outputs, signify interleaved input with `--interinput`
   - Automatic detection of input/output mode
+
 - **Multithreading with Rayon**:  
   - Adjustable thread count via `--threads` argument  
   - Defaults to all available cores
+
 - **Memory Limit**:  
-  - Specify maximum memory usage with `--maxmem <String>` (e.g., `5G`, `500M`)  
-  - Defaults to **85% of system memory**
+  - Specify maximum memory usage with `--maxmem <String>` (e.g., `5G` for 5 gigabytes, `500M` for 500 megabytes)  
+  - Defaults to using 85% of available system memory
+
 - **Automatic Reference Indexing**:  
-  - Builds a serialized reference k-mer index using Bincode if `--binref <file>` is provided
-  - Automatically reloads saved index on subsequent runs
+  - Builds a serialized reference k-mer index using Bincode if `--binref <file>` is provided from references provided with `--ref <file>`
+  - Uses saved index on subsequent runs if `--binref <file>` points to a serialized hashset of kmers
+  
 - **Output statistics**:
   - Total reads and bases processed  
   - Matches and non-matches  
   - Processing speed (reads/sec, bases/sec)
+
+## **Performance Variables**
+| **Parameter**        | **Default**                    | **Notes**                           |
+|----------------------|--------------------------------|-------------------------------------|
+| Threads              | Number of available threads    | Adjust with `--threads <int>`       |
+| Max memory           | 85% of system memory           | Adjust with `--maxmem <String>`     |
+| Chunk size           | 10,000 reads                   | Modify in source code               |
+| Serialization format | [Bincode](https://docs.rs/bincode/) Standard | Modify in source code |
+
+See more parameter documentation at ./rustduk.sh
 
 ---
 
@@ -39,14 +54,12 @@ If using UNIX, run this command and follow the ensuing instructions
 
 `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 
-If using Windows, download the correct installer from Rustup
-
-`https://rustup.rs/#`
+If using Windows, download the correct installer from [Rustup](https://rustup.rs/#)
 
 ### **2. Clone the repository**
 ```bash
-git clone https://github.com/jackdougle/rust-duk.git
-cd rust-duk
+git clone https://github.com/jackdougle/rustduk.git
+cd rustduk
 ```
 
 ### **3. Build the project**
@@ -57,15 +70,14 @@ cargo build --release
 
 The binary will be located at:
 ```
-target/release/rust-duk
+target/release/rustduk
 ```
 
 ---
 
-## **Usage**
-
+## **Example Usage**
 ```bash
-rust-duk --in reads.fq --ref reference.fa --outm matched.fq --outu unmatched.fq ...
+./rustduk.sh --in reads.fq --ref reference.fa --outm matched.fq --outu unmatched.fq ...
 ```
 
 This command:
@@ -75,32 +87,12 @@ This command:
 
 ---
 
-### **Thread Control**
-By default, Rust-DUK uses all available logical cores.  
-You can limit the number of threads with `--threads` flag followed by an int.
-
-### **Memory Limit**
-By default, Rust-DUK uses **85% of available system memory**.  
-To manually specify a memory cap, use the `--maxmem` flag with a string. `5G` describes 5 gigabytes, 100M describes 100 megabytes.
-
-### **Using References**
-The first time Rust-DUK is run with a new reference, it builds a binary k-mer index and saves it for faster loading in future runs.
-
-Default behavior:
-1. Looks for a serialized index (.bin file) at the path specified by `--binref`.
-2. If not found, it will:
-   - Load k-mers directly from the reference FASTA/FASTQ (`--ref`)
-   - Serialize and save them for future runs to path specified with `--binref`
-
-See more parameter documentation at ./rustduk.sh
-
----
-
 ## **Output**
 
 Output files support either FASTA or FASTQ format.
+- Will default to FASTQ unless extension is .fa, .fna, or .fasta
 
-Example output:
+Example console output:
 
 ```
 Indexing time:        0.040 seconds
@@ -117,28 +109,6 @@ Time:                 0.150 seconds
 Reads Processed:      1.00m reads               6.65m reads/sec
 Bases Processed:      150.00m bases             1000.00m bases/sec
 ```
-
----
-
-## **Performance Tuning**
-| **Parameter**        | **Default**                    | **Notes**                           |
-|----------------------|--------------------------------|-------------------------------------|
-| Threads              | Number of available threads    | Adjust with `--threads <int>`       |
-| Max memory           | 85% of system memory           | Adjust with `--maxmem <String>`     |
-| Chunk size           | 10,000 reads                   | Modify in source code               |
-| Serialization format | [Bincode](https://docs.rs/bincode/) Standard | Modify in source code |
-
-
-### **Processing Modes**
-Rust-DUK automatically detects the appropriate read handling mode:
-
-| **Mode**                   | **Description**                                     |
-|----------------------------|-----------------------------------------------------|
-| `Unpaired`                 | Single input file, unpaired reads                   |
-| `Paired`                   | Two input files, separate outputs                   |
-| `PairedInInterOut`         | Two input files, interleaved output                 |
-| `InterInPairedOut`         | Interleaved input file, separate paired outputs     |
-| `Interleaved`              | Interleaved input and output                        |
 
 ---
 
@@ -162,23 +132,18 @@ Rust-DUK automatically detects the appropriate read handling mode:
    - Atomic counters track total reads and bases matched/unmatched  
    - Final summary printed at the end
 
+### **Processing Modes**
+RustDUK automatically detects the appropriate read handling mode:
+
+| **Mode**                   | **Description**                                     |
+|----------------------------|-----------------------------------------------------|
+| `Unpaired`                 | Single input file, unpaired reads                   |
+| `Paired`                   | Two input files, separate outputs                   |
+| `PairedInInterOut`         | Two input files, interleaved output                 |
+| `InterInPairedOut`         | Interleaved input file, separate paired outputs     |
+| `Interleaved`              | Interleaved input and output                        |
+
 ---
-
-### **Memory Management**
-- By default, Rust-DUK dynamically allocates memory up to **85% of total system RAM**.
-- If `--maxmem` is provided, memory usage is capped accordingly.
-- Memory is used primarily for:
-  - Reference k-mer index
-  - Input/output buffers
-  - Parallel processing of read chunks
-
-
-### **Thread Management**
-
-Rust-DUK uses Rayon for multithreaded processing
-- Number of threads used can be controlled via `--threads`
-- Defaults to all avilable threads
-
 
 ## **Future Features**
 

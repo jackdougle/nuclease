@@ -1,8 +1,12 @@
 /.vscode
+/DS_Store
+
 /in
-/misc
 /out
 /ref
+
+/misc
 /target
-/profile.json.gz
-/Cargo.lock
+
+*.gz
+*.json

@@ -7,7 +7,7 @@ Last modified September 5, 2025
 
 Purpose: 
 
-Usage: rust-duk.sh --ref <file> --in <file> --outu <file> --outm <file> --k <int> ...
+Usage: rustduk.sh --ref <file> --in <file> --outu <file> --outm <file> --k <int> ...
 
 Input Parameters:
     --in <file>         Input .fa/.fq file containing reads to be filtered.
