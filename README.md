@@ -106,11 +106,11 @@ Indexing time:		0.040 seconds
 
 Processing reads from reads.fq using 14 threads
 Input and output is processed as interleaved
-Processing time:	0.110 seconds
+Processing time:      0.110 seconds
 
-Input:			          1000000 reads			      150000000 bases
-Matches:		          20000 reads (2.00%) 		3000000 bases (2.00%)
-Nonmatches:		        980000 reads (98.00%)		147000000 bases (98.00%)
+Input:                1000000 reads			      150000000 bases
+Matches:              20000 reads (2.00%) 		3000000 bases (2.00%)
+Nonmatches:           980000 reads (98.00%)		147000000 bases (98.00%)
 
 Time:			            0.150 seconds
 Reads Processed:	    1.00m reads			        6.65m reads/sec
@@ -123,7 +123,7 @@ Bases Processed:	    150.00m bases			      1000.00m bases/sec
 
 | **Parameter**        | **Default**                    | **Notes**                           |
 |----------------------|--------------------------------|-------------------------------------|
-| Threads              | Number of logical CPU cores    | Adjust with `--threads <int>`       |
+| Threads              | Number of logical threads      | Adjust with `--threads <int>`       |
 | Max memory           | 85% of system memory           | Adjust with `--maxmem <String>`     |
 | Chunk size           | 10,000 reads                   | Modify in source code               |
 | Serialization format | [Bincode](https://docs.rs/bincode/) Standard | Modify in source code |
