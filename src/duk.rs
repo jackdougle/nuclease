@@ -1,44 +1,56 @@
 use crate::kmer_processor::KmerProcessor;
 use bincode::{config, decode_from_std_read, encode_into_std_write};
+use bytesize::ByteSize;
 use needletail::parse_fastx_file;
 use rayon::prelude::*;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::mem::take;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::Instant;
+use sysinfo::System;
 
 // TODO:
 // - Add k-mer length metadata to serialized file and error checking
 // - Add piping from stdin and piping to stdout
 // - Add memory maximum (argument)
-// - Add # of threads to use (argument)
-// - Do documentation (vvv)
-// - Github repo: follow crates.io syntax
-// - Try to upload crate to crates.io and docs.rs
-// - Consider pull request to Rust-Bio (still going?)
+// - Add function that writes in either FASTQ or FASTA format
 
 pub fn run(args: crate::Args) {
     let start_time = Instant::now();
+    let available_threads = num_cpus::get();
 
-    let k = args.k;
-    let min_hits = args.minhits;
-    let _num_threads = args.threads;
-    let _max_memory = args.maxmem;
-    let ref_path = args.r#ref;
     let in_path = args.r#in;
     let in2_path = args.in2;
+    let ref_path = args.r#ref;
+    let bin_kmers_path = &args.binref;
+
     let outm_path = args.outm;
     let outu_path = args.outu;
     let outm2_path = args.outm2;
     let outu2_path = args.outu2;
-    let bin_kmers_path = &args.binref;
-    let interleaved_input = args.interinput;
 
+    let k = args.k;
+    let min_hits = args.minhits;
+    let interleaved_input = args.interinput;
+    let num_threads = args
+        .threads
+        .unwrap_or(available_threads)
+        .min(available_threads);
+    let max_memory = match args.maxmem {
+        Some(mem_str) => ByteSize::from_str(&mem_str)
+            .unwrap_or_else(|_| panic!("Invalid memory format: {}", mem_str))
+            .as_u64(),
+        None => {
+            let sys = System::new_all();
+            (sys.available_memory() as f64 * 0.85) as u64
+        }
+    };
     let mut kmer_processor = KmerProcessor::new(k, min_hits);
 
     match load_serialized_kmers(bin_kmers_path, &mut kmer_processor) {
@@ -76,7 +88,15 @@ pub fn run(args: crate::Args) {
 
     let indexing_time = start_time.elapsed().as_secs_f32();
     println!("Indexing time:\t\t{:.3} seconds\n", indexing_time);
-    println!("Processing reads from {}", in_path);
+    println!(
+        "Processing reads from {} using {} threads",
+        in_path, num_threads
+    );
+
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .build_global()
+        .expect("Could not build Rayon Pool with specified thread amount");
 
     match process_reads(
         in_path,
@@ -87,6 +107,7 @@ pub fn run(args: crate::Args) {
         &outm2_path,
         &outu2_path,
         interleaved_input,
+        max_memory,
     ) {
         Ok((mseq_count, mbase_count, useq_count, ubase_count)) => {
             let read_count = mseq_count + useq_count;
@@ -106,7 +127,7 @@ pub fn run(args: crate::Args) {
                 mbase_count + ubase_count
             );
             println!(
-                "Matches:\t\t{} reads ({:.2}%)   \t\t{} bases ({:.2}%)",
+                "Matches:\t\t{} reads ({:.2}%) \t\t{} bases ({:.2}%)",
                 mseq_count, matched_percent, mbase_count, mbase_percent
             );
             println!(
@@ -274,6 +295,7 @@ fn process_reads(
     matched2_path: &str,
     unmatched2_path: &str,
     interleaved_input: bool,
+    _max_memory: u64,
 ) -> Result<(u32, u32, u32, u32), Box<dyn Error + Send + Sync>> {
     let processor = Arc::new(processor);
     let process_mode = detect_mode(
@@ -283,34 +305,41 @@ fn process_reads(
         interleaved_input,
     );
 
-    let (sender, receiver): (
-        Sender<Vec<(bool, Vec<u8>, Vec<u8>)>>,
-        Receiver<Vec<(bool, Vec<u8>, Vec<u8>)>>,
+    let (chunk_sender, chunk_receiver): (
+        Sender<Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)>>,
+        Receiver<Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)>>,
     ) = channel();
 
-    let sender2 = sender.clone();
-    let reader_thread = thread::spawn(move || -> Result<(), Box<dyn Error + Send + Sync>> {
+    let matched_filetype = matched_path.rsplit('.').next().unwrap_or("");
+    let unmatched_filetype = unmatched_path.rsplit('.').next().unwrap_or("");
+
+    let parallel_sender = chunk_sender.clone();
+    let worker_thread = thread::spawn(move || -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut reader = parse_fastx_file(reads_path)?;
 
-        const CHUNK_SIZE: usize = 2_000;
-        let mut chunk = Vec::with_capacity(CHUNK_SIZE);
+        let chunk_size: usize = 10_000;
+        let mut chunk = Vec::with_capacity(chunk_size);
 
         if process_mode == ProcessMode::Unpaired {
             while let Some(record) = reader.next() {
                 let record = record?;
-                chunk.push((record.id().to_vec(), record.seq().to_vec()));
+                chunk.push((
+                    record.id().to_vec(),
+                    record.seq().to_vec(),
+                    record.qual().unwrap().to_vec(),
+                ));
 
-                if chunk.len() == CHUNK_SIZE {
+                if chunk.len() == chunk_size {
                     let processor = processor.clone();
-                    let sender = sender2.clone();
+                    let sender = parallel_sender.clone();
                     let local_chunk = take(&mut chunk);
 
                     rayon::spawn(move || {
-                        let processed: Vec<(bool, Vec<u8>, Vec<u8>)> = local_chunk
+                        let processed: Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)> = local_chunk
                             .into_par_iter()
-                            .map(|(id, seq)| {
+                            .map(|(id, seq, qual)| {
                                 let has_match = processor.process_read(&seq);
-                                (has_match, id, seq)
+                                (has_match, id, seq, qual)
                             })
                             .collect();
 
@@ -320,35 +349,39 @@ fn process_reads(
             }
 
             if !chunk.is_empty() {
-                let processed: Vec<(bool, Vec<u8>, Vec<u8>)> = chunk
+                let processed: Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)> = chunk
                     .into_par_iter()
-                    .map(|(id, seq)| {
+                    .map(|(id, seq, qual)| {
                         let has_match = processor.process_read(&seq);
-                        (has_match, id, seq)
+                        (has_match, id, seq, qual)
                     })
                     .collect();
 
-                let _ = sender2.send(processed);
+                let _ = parallel_sender.send(processed);
             }
         } else if process_mode == ProcessMode::Interleaved
             || process_mode == ProcessMode::InterInPairedOut
         {
             while let Some(record) = reader.next() {
                 let record = record?;
-                chunk.push((record.id().to_vec(), record.seq().to_vec()));
+                chunk.push((
+                    record.id().to_vec(),
+                    record.seq().to_vec(),
+                    record.qual().unwrap().to_vec(),
+                ));
 
-                if chunk.len() == CHUNK_SIZE {
+                if chunk.len() == chunk_size {
                     let processor = processor.clone();
-                    let sender = sender2.clone();
+                    let sender = parallel_sender.clone();
                     let local_chunk = take(&mut chunk);
 
                     // Process chunk in parallel
                     rayon::spawn(move || {
-                        let processed: Vec<(bool, Vec<u8>, Vec<u8>)> = local_chunk
+                        let processed: Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)> = local_chunk
                             .into_par_iter()
-                            .map(|(id, seq)| {
+                            .map(|(id, seq, qual)| {
                                 let has_match = processor.process_read(&seq);
-                                (has_match, id, seq)
+                                (has_match, id, seq, qual)
                             })
                             .collect();
 
@@ -358,38 +391,46 @@ fn process_reads(
             }
 
             if !chunk.is_empty() {
-                let processed: Vec<(bool, Vec<u8>, Vec<u8>)> = chunk
+                let processed: Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)> = chunk
                     .into_par_iter()
-                    .map(|(id, seq)| {
+                    .map(|(id, seq, qual)| {
                         let has_match = processor.process_read(&seq);
-                        (has_match, id, seq)
+                        (has_match, id, seq, qual)
                     })
                     .collect();
 
-                let _ = sender2.send(processed);
+                let _ = parallel_sender.send(processed);
             }
         } else if process_mode == ProcessMode::PairedInInterOut
             || process_mode == ProcessMode::Paired
         {
             let mut reader2 = parse_fastx_file(reads2_path)?;
-            let mut chunk = Vec::with_capacity(CHUNK_SIZE);
+            let mut chunk = Vec::with_capacity(chunk_size);
             while let (Some(record1), Some(record2)) = (reader.next(), reader2.next()) {
                 let record1 = record1?;
                 let record2 = record2?;
 
-                chunk.push((record1.id().to_vec(), record1.seq().to_vec()));
-                chunk.push((record2.id().to_vec(), record2.seq().to_vec()));
+                chunk.push((
+                    record1.id().to_vec(),
+                    record1.seq().to_vec(),
+                    record1.qual().unwrap().to_vec(),
+                ));
+                chunk.push((
+                    record2.id().to_vec(),
+                    record2.seq().to_vec(),
+                    record2.qual().unwrap().to_vec(),
+                ));
 
-                if chunk.len() == CHUNK_SIZE {
+                if chunk.len() == chunk_size {
                     let processor = processor.clone();
-                    let sender = sender2.clone();
+                    let sender = parallel_sender.clone();
                     let local_chunk = take(&mut chunk);
                     rayon::spawn(move || {
-                        let processed: Vec<(bool, Vec<u8>, Vec<u8>)> = local_chunk
+                        let processed: Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)> = local_chunk
                             .into_par_iter()
-                            .map(|(id, seq)| {
+                            .map(|(id, seq, qual)| {
                                 let has_match = processor.process_read(&seq);
-                                (has_match, id, seq)
+                                (has_match, id, seq, qual)
                             })
                             .collect();
 
@@ -399,49 +440,43 @@ fn process_reads(
             }
 
             if !chunk.is_empty() {
-                let processed: Vec<(bool, Vec<u8>, Vec<u8>)> = chunk
+                let processed: Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)> = chunk
                     .into_par_iter()
-                    .map(|(id, seq)| {
+                    .map(|(id, seq, qual)| {
                         let has_match = processor.process_read(&seq);
-                        (has_match, id, seq)
+                        (has_match, id, seq, qual)
                     })
                     .collect();
 
-                let _ = sender2.send(processed);
+                let _ = parallel_sender.send(processed);
             }
         }
 
         Ok(())
     });
 
-    drop(sender);
+    drop(chunk_sender);
 
-    let mut matched_writer = BufWriter::new(File::create(matched_path)?);
-    let mut unmatched_writer = BufWriter::with_capacity(4_000_000, File::create(unmatched_path)?);
+    let mut matched_writer: BufWriter<File> = BufWriter::new(File::create(matched_path)?);
+    let mut unmatched_writer: BufWriter<File> =
+        BufWriter::with_capacity(4_000_000, File::create(unmatched_path)?);
 
     let matched_count = Arc::new(AtomicU32::new(0));
     let matched_bases = Arc::new(AtomicU32::new(0));
+
     let unmatched_count = Arc::new(AtomicU32::new(0));
     let unmatched_bases = Arc::new(AtomicU32::new(0));
 
     if process_mode == ProcessMode::Unpaired {
-        for batch in receiver {
-            for (has_match, id, seq) in batch {
+        for batch in chunk_receiver {
+            for (has_match, id, seq, qual) in batch {
                 if has_match {
-                    matched_writer.write_all(b">")?;
-                    matched_writer.write_all(&id)?;
-                    matched_writer.write_all(b"\n")?;
-                    matched_writer.write_all(&seq)?;
-                    matched_writer.write_all(b"\n")?;
+                    write_read(&mut matched_writer, &id, &seq, &qual, matched_filetype)?;
 
                     matched_count.fetch_add(1, Ordering::Relaxed);
                     matched_bases.fetch_add(seq.len() as u32, Ordering::Relaxed);
                 } else {
-                    unmatched_writer.write_all(b">")?;
-                    unmatched_writer.write_all(&id)?;
-                    unmatched_writer.write_all(b"\n")?;
-                    unmatched_writer.write_all(&seq)?;
-                    unmatched_writer.write_all(b"\n")?;
+                    write_read(&mut unmatched_writer, &id, &seq, &qual, unmatched_filetype)?;
 
                     unmatched_count.fetch_add(1, Ordering::Relaxed);
                     unmatched_bases.fetch_add(seq.len() as u32, Ordering::Relaxed);
@@ -451,37 +486,45 @@ fn process_reads(
     } else if process_mode == ProcessMode::Interleaved
         || process_mode == ProcessMode::PairedInInterOut
     {
-        for batch in receiver {
+        for batch in chunk_receiver {
             for i in (0..batch.len() - 1).step_by(2) {
                 let has_match = batch[i].0 || batch[i + 1].0;
 
                 if has_match {
-                    matched_writer.write_all(b">")?;
-                    matched_writer.write_all(&batch[i].1)?;
-                    matched_writer.write_all(b"\n")?;
-                    matched_writer.write_all(&batch[i].2)?;
-                    matched_writer.write_all(b"\n")?;
+                    write_read(
+                        &mut matched_writer,
+                        &batch[i].1,
+                        &batch[i].2,
+                        &batch[i].3,
+                        matched_filetype,
+                    )?;
 
-                    matched_writer.write_all(b">")?;
-                    matched_writer.write_all(&batch[i + 1].1)?;
-                    matched_writer.write_all(b"RC\n")?;
-                    matched_writer.write_all(&batch[i + 1].2)?;
-                    matched_writer.write_all(b"\n")?;
+                    write_read(
+                        &mut matched_writer,
+                        &batch[i + 1].1,
+                        &batch[i + 1].2,
+                        &batch[i + 1].3,
+                        matched_filetype,
+                    )?;
 
                     matched_count.fetch_add(2, Ordering::Relaxed);
                     matched_bases.fetch_add(batch[i].2.len() as u32 * 2, Ordering::Relaxed);
                 } else {
-                    unmatched_writer.write_all(b">")?;
-                    unmatched_writer.write_all(&batch[i].1)?;
-                    unmatched_writer.write_all(b"\n")?;
-                    unmatched_writer.write_all(&batch[i].2)?;
-                    unmatched_writer.write_all(b"\n")?;
+                    write_read(
+                        &mut unmatched_writer,
+                        &batch[i].1,
+                        &batch[i].2,
+                        &batch[i].3,
+                        unmatched_filetype,
+                    )?;
 
-                    unmatched_writer.write_all(b">")?;
-                    unmatched_writer.write_all(&batch[i + 1].1)?;
-                    unmatched_writer.write_all(b"RC\n")?;
-                    unmatched_writer.write_all(&batch[i + 1].2)?;
-                    unmatched_writer.write_all(b"\n")?;
+                    write_read(
+                        &mut unmatched_writer,
+                        &batch[i + 1].1,
+                        &batch[i + 1].2,
+                        &batch[i + 1].3,
+                        unmatched_filetype,
+                    )?;
 
                     unmatched_count.fetch_add(2, Ordering::Relaxed);
                     unmatched_bases.fetch_add(batch[i].2.len() as u32 * 2, Ordering::Relaxed);
@@ -492,35 +535,43 @@ fn process_reads(
         let mut matched2_writer: BufWriter<File> = BufWriter::new(File::create(matched2_path)?);
         let mut unmatched2_writer: BufWriter<File> = BufWriter::new(File::create(unmatched2_path)?);
 
-        for batch in receiver {
+        for batch in chunk_receiver {
             for i in (0..batch.len() - 1).step_by(2) {
                 if batch[i].0 || batch[i + 1].0 {
-                    matched_writer.write_all(b">")?;
-                    matched_writer.write_all(&batch[i].1)?;
-                    matched_writer.write_all(b"\n")?;
-                    matched_writer.write_all(&batch[i].2)?;
-                    matched_writer.write_all(b"\n")?;
+                    write_read(
+                        &mut matched_writer,
+                        &batch[i].1,
+                        &batch[i].2,
+                        &batch[i].3,
+                        matched_filetype,
+                    )?;
 
-                    matched2_writer.write_all(b">")?;
-                    matched2_writer.write_all(&batch[i + 1].1)?;
-                    matched2_writer.write_all(b"\n")?;
-                    matched2_writer.write_all(&batch[i + 1].2)?;
-                    matched2_writer.write_all(b"\n")?;
+                    write_read(
+                        &mut matched2_writer,
+                        &batch[i + 1].1,
+                        &batch[i + 1].2,
+                        &batch[i + 1].3,
+                        matched_filetype,
+                    )?;
 
                     matched_count.fetch_add(2, Ordering::Relaxed);
                     matched_bases.fetch_add(batch[i].2.len() as u32 * 2, Ordering::Relaxed);
                 } else {
-                    unmatched_writer.write_all(b">")?;
-                    unmatched_writer.write_all(&batch[i].1)?;
-                    unmatched_writer.write_all(b"\n")?;
-                    unmatched_writer.write_all(&batch[i].2)?;
-                    unmatched_writer.write_all(b"\n")?;
+                    write_read(
+                        &mut unmatched_writer,
+                        &batch[i].1,
+                        &batch[i].2,
+                        &batch[i].3,
+                        unmatched_filetype,
+                    )?;
 
-                    unmatched2_writer.write_all(b">")?;
-                    unmatched2_writer.write_all(&batch[i + 1].1)?;
-                    unmatched2_writer.write_all(b"\n")?;
-                    unmatched2_writer.write_all(&batch[i + 1].2)?;
-                    unmatched2_writer.write_all(b"\n")?;
+                    write_read(
+                        &mut unmatched2_writer,
+                        &batch[i + 1].1,
+                        &batch[i + 1].2,
+                        &batch[i + 1].3,
+                        unmatched_filetype,
+                    )?;
 
                     unmatched_count.fetch_add(2, Ordering::Relaxed);
                     unmatched_bases.fetch_add(batch[i].2.len() as u32 * 2, Ordering::Relaxed);
@@ -534,8 +585,7 @@ fn process_reads(
 
     matched_writer.flush()?;
     unmatched_writer.flush()?;
-
-    reader_thread.join().unwrap()?;
+    worker_thread.join().unwrap()?;
 
     Ok((
         matched_count.load(Ordering::Relaxed),
@@ -543,4 +593,30 @@ fn process_reads(
         unmatched_count.load(Ordering::Relaxed),
         unmatched_bases.load(Ordering::Relaxed),
     ))
+}
+
+fn write_read(
+    writer: &mut BufWriter<File>,
+    id: &[u8],
+    sequence: &[u8],
+    quality: &[u8],
+    format: &str,
+) -> Result<(), Box<dyn Send + Sync + Error>> {
+    if format == "fa" || format == "fna" || format == "fasta" {
+        writer.write_all(b">")?;
+        writer.write_all(id)?;
+        writer.write_all(b"\n")?;
+        writer.write_all(sequence)?;
+        writer.write_all(b"\n")?;
+    } else {
+        writer.write_all(b"@")?;
+        writer.write_all(id)?;
+        writer.write_all(b"\n")?;
+        writer.write_all(sequence)?;
+        writer.write_all(b"\n+\n")?;
+        writer.write_all(quality)?;
+        writer.write_all(b"\n")?;
+    }
+
+    Ok(())
 }

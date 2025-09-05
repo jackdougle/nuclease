@@ -3,12 +3,21 @@ name = "rust-duk"
 version = "0.1.0"
 edition = "2024"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "4.5.43", features = ["derive"] }
+clap = { version = "4.5.47", features = ["derive"] }
 needletail = "0.6.3"
 rustc-hash = "2.1.1"
-rayon = "1.10.0"
+rayon = "1.11.0"
 bincode = "2.0.1"
 wide = "0.7.33"
+num_cpus = "1.17.0"
+sysinfo = "0.37.0"
+bytesize = "2.0.1"
+dhat = "0.3.3"
+
+[profile.release]
+debug = 1
+
+[features]
+dhat-heap = []
