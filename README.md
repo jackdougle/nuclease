@@ -108,13 +108,13 @@ Processing reads from reads.fq using 14 threads
 Input and output is processed as interleaved
 Processing time:      0.110 seconds
 
-Input:                1000000 reads			      150000000 bases
-Matches:              20000 reads (2.00%) 		3000000 bases (2.00%)
-Nonmatches:           980000 reads (98.00%)		147000000 bases (98.00%)
+Input:                1000000 reads             150000000 bases
+Matches:              20000 reads (2.00%)       3000000 bases (2.00%)
+Nonmatches:           980000 reads (98.00%)     147000000 bases (98.00%)
 
 Time:                 0.150 seconds
-Reads Processed:      1.00m reads			        6.65m reads/sec
-Bases Processed:      150.00m bases			      1000.00m bases/sec
+Reads Processed:      1.00m reads               6.65m reads/sec
+Bases Processed:      150.00m bases             1000.00m bases/sec
 ```
 
 ---
