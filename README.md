@@ -36,15 +36,7 @@ Inspired by [BBDuk](https://archive.jgi.doe.gov/data-and-tools/software-tools/bb
 - Matches and non-matches  
 - Processing speed (reads/sec, bases/sec)
 
-## **Performance Variables**
-| **Parameter**        | **Default**                    | **Notes**                           |
-|----------------------|--------------------------------|-------------------------------------|
-| Threads              | Number of available threads    | Adjust with `--threads <int>`       |
-| Max memory           | 85% of system memory           | Adjust with `--maxmem <String>`     |
-| Chunk size           | 10,000 reads                   | Modify in source code               |
-| Serialization format | [Bincode](https://docs.rs/bincode/) Standard | Modify in source code |
-
-# **See more parameter documentation at ./rustduk.sh**
+**See more parameter documentation at ./rustduk.sh**
 
 ---
 
