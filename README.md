@@ -36,7 +36,7 @@ Inspired by [BBDuk](https://archive.jgi.doe.gov/data-and-tools/software-tools/bb
 - Matches and non-matches  
 - Processing speed (reads/sec, bases/sec)
 
-**See more parameter documentation at ./rustduk.sh**
+See more parameter documentation at **[./rustduk.sh](rustduk.sh)**
 
 ---
 
