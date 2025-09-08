@@ -50,7 +50,8 @@ If using Windows, download the correct installer from [Rustup](https://rustup.rs
 From the releases tab, download the latest version (currently 1.0.0 🎉).
 
 ### **3. Run program with necessary parameters**
-Nuclease requires at least `--in`, `--ref` OR `--binref`, `--outm`, and `--outu` to be provided.
+Nuclease requires at least `--in`, `--ref` or `--binref`, `--outm`, and `--outu` to be provided.
+   - Providing both ref arguments is generally best for performance and redundance
 
 See more parameter documentation at **[./src/main.rs](/src/main.rs)**
 
