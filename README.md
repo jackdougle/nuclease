@@ -15,8 +15,8 @@ Inspired by [BBDuk](https://archive.jgi.doe.gov/data-and-tools/software-tools/bb
   - x is 1 by default, changed with `--minhits <int>`
 
 **Piping**:  
-- Use --in stdin.fq to pipe from stdin
-- use --outm/outu/outm2/outu2 stdout.fa/stdout.fq to pipe results to stdout
+- Use `--in stdin` to pipe from stdin
+- use `--outm`/`outu`/`outm2`/`outu2` `stdout.fa`/`stdout.fq` to pipe results to stdout
 
 **Paired reads support**:  
 - Paired inputs and outputs can be specified by adding more input/output files
@@ -42,14 +42,21 @@ Inspired by [BBDuk](https://archive.jgi.doe.gov/data-and-tools/software-tools/bb
 ### **1. Install Rust**
 If using UNIX, run this command and follow the ensuing instructions:
 
-`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
 
 If using Windows, download the correct installer from [Rustup](https://rustup.rs/#).
 
-### **2. Download the release package**
-From the releases tab, download the latest version (currently 1.0.0 🎉).
+### **2. Download the release executable**
+From the releases tab, download the latest version (currently 1.0.0 🎉).\
 
-### **3. Run program with necessary parameters**
+### **3. Allow execution permissions**
+```bash
+chmod +x ./nuclease
+```
+
+### **4. Run program with necessary parameters**
 Nuclease requires at least `--in`, `--ref` or `--binref`, `--outm`, and `--outu` to be provided.
    - Providing both ref arguments is generally best for performance and redundance
 
@@ -59,7 +66,7 @@ See more parameter documentation at **[./src/main.rs](/src/main.rs)**
 
 ## **Example Usage**
 ```bash
-nuclease --in reads.fq --ref refs.fa --outm matched.fq --outu unmatched.fq --k 21
+./nuclease --in reads.fq --ref refs.fa --outm matched.fq --outu unmatched.fq --k 21
 ```
 
 This command:
@@ -98,9 +105,9 @@ Bases Processed:      150.00m bases             1000.00m bases/sec
 ### **Program Stages**
 
 1. **Load reference k-mers**  
-   - If serialized reference k-mer index exists, load using Bincode  
-   - Else, parse reference FASTA and build k-mer index  
-   - Serialize for future runs, if `--binref <File>` is provided
+   - If serialized reference k-mer index exists, loads using Bincode  
+   - Else, parses reference FASTA reference file and builds k-mer index  
+   - Serializes for future runs if `--binref <File>` is provided
 
 2. **Process reads in chunks**  
    - Reads are batched into chunks of 10,000 records  
@@ -109,11 +116,10 @@ Bases Processed:      150.00m bases             1000.00m bases/sec
 3. **Output matched/unmatched reads**  
    - Results are written as they are processed  
    - Separate or interleaved output depending on mode
-   - Input second pair of output files for 2nd pair of paired reads output
+   - Supports second pair of output files for 2nd pair of reads, if paired
 
 4. **Statistics collection**  
-   - Thread-safe counters track total reads and bases matched/unmatched  
-   - Print summary at end
+   - Atomic counters track total reads and bases matched/unmatched and processing speed
 
 ### **Processing Modes**
 Nuclease automatically detects the appropriate read handling mode:
