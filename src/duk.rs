@@ -1,76 +1,58 @@
 use crate::kmer_processor::KmerProcessor;
 use bincode::{config, decode_from_std_read, encode_into_std_write};
-use bytesize::ByteSize;
 use needletail::parse_fastx_file;
 use rayon::prelude::*;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::mem::take;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::Instant;
-use sysinfo::System;
+use std::{fs, io};
 
-// TODO:
-// - Add k-mer length metadata to serialized file and error checking
-// - Add piping from stdin and piping to stdout
-// - Add memory maximum (argument)
-// - Add function that writes in either FASTQ or FASTA format
-
-pub fn run(args: crate::Args) {
+pub fn run(args: crate::Args) -> io::Result<()> {
     let start_time = Instant::now();
     let available_threads = num_cpus::get();
 
     let in_path = args.r#in;
-    let in2_path = args.in2;
+    let in2_path = args.in2.unwrap_or_default();
     let ref_path = args.r#ref;
-    let bin_kmers_path = &args.binref;
+    let bin_kmers_path = &args.binref.unwrap_or_default();
 
     let outm_path = args.outm;
     let outu_path = args.outu;
-    let outm2_path = args.outm2;
-    let outu2_path = args.outu2;
+    let outm2_path = args.outm2.unwrap_or_default();
+    let outu2_path = args.outu2.unwrap_or_default();
 
-    let k = args.k;
-    let min_hits = args.minhits;
+    let k = args.k.unwrap_or(21);
+    let min_hits = args.minhits.unwrap_or(1);
     let interleaved_input = args.interinput;
     let num_threads = args
         .threads
         .unwrap_or(available_threads)
         .min(available_threads);
-    let max_memory = match args.maxmem {
-        Some(mem_str) => ByteSize::from_str(&mem_str)
-            .unwrap_or_else(|_| panic!("Invalid memory format: {}", mem_str))
-            .as_u64(),
-        None => {
-            let sys = System::new_all();
-            (sys.available_memory() as f64 * 0.85) as u64
-        }
-    };
+
     let mut kmer_processor = KmerProcessor::new(k, min_hits);
 
     match load_serialized_kmers(bin_kmers_path, &mut kmer_processor) {
         Ok(()) => {
             println!(
                 "\nLoaded {} k-mers from {}",
-                kmer_processor.ref_kmers.iter().size_hint().0,
+                kmer_processor.ref_kmers.iter().size_hint().0 - 1,
                 bin_kmers_path
             )
         }
         Err(e) => {
-            eprintln!(
-                "\nInvalid/no seralized k-mers found: {}\nLoading references from {}",
-                e, ref_path
-            );
+            eprintln!("\nError using serialized ref file: {}", e);
+            println!("Loading ref k-mers from {}", ref_path);
 
             match get_reference_kmers(&ref_path, &mut kmer_processor) {
                 Ok(()) => println!(
-                    "Added {} from {}",
-                    kmer_processor.ref_kmers.iter().size_hint().0,
+                    "Added {} from {}\n",
+                    kmer_processor.ref_kmers.iter().size_hint().0 - 1,
                     ref_path,
                 ),
                 Err(e) => {
@@ -107,7 +89,6 @@ pub fn run(args: crate::Args) {
         &outm2_path,
         &outu2_path,
         interleaved_input,
-        max_memory,
     ) {
         Ok((mseq_count, mbase_count, useq_count, ubase_count)) => {
             let read_count = mseq_count + useq_count;
@@ -183,6 +164,8 @@ pub fn run(args: crate::Args) {
             eprintln!("\nError processing reads:\n{}", e);
         }
     }
+
+    Ok(())
 }
 
 fn load_serialized_kmers(
@@ -193,6 +176,12 @@ fn load_serialized_kmers(
     let mut reader = BufReader::new(bin_kmers_file);
 
     processor.ref_kmers = decode_from_std_read(&mut reader, config::standard())?;
+
+    let size_metadata = u64::MAX ^ processor.k as u64;
+    if !processor.ref_kmers.contains(&size_metadata) {
+        processor.ref_kmers.clear();
+        return Err(format!("k-mers are of different length").into());
+    }
 
     Ok(())
 }
@@ -295,7 +284,6 @@ fn process_reads(
     matched2_path: &str,
     unmatched2_path: &str,
     interleaved_input: bool,
-    _max_memory: u64,
 ) -> Result<(u32, u32, u32, u32), Box<dyn Error + Send + Sync>> {
     let processor = Arc::new(processor);
     let process_mode = detect_mode(
@@ -312,10 +300,18 @@ fn process_reads(
 
     let matched_filetype = matched_path.rsplit('.').next().unwrap_or("");
     let unmatched_filetype = unmatched_path.rsplit('.').next().unwrap_or("");
+    let matched_stdout = matched_path == "stdout" || matched_path.starts_with("stdout.");
+    let unmatched_stdout = unmatched_path == "stdout" || unmatched_path.starts_with("stdout.");
+    let matched2_stdout = matched2_path == "stdout" || matched2_path.starts_with("stdout.");
+    let unmatched2_stdout = unmatched2_path == "stdout" || unmatched2_path.starts_with("stdout.");
 
     let parallel_sender = chunk_sender.clone();
     let worker_thread = thread::spawn(move || -> Result<(), Box<dyn Error + Send + Sync>> {
-        let mut reader = parse_fastx_file(reads_path)?;
+        let mut reader = if reads_path == "stdin" || reads_path.starts_with("stdin.") {
+            needletail::parse_fastx_reader(io::stdin())
+        } else {
+            needletail::parse_fastx_file(&reads_path)
+        }?; // Note the trailing ? for error handling
 
         let chunk_size: usize = 10_000;
         let mut chunk = Vec::with_capacity(chunk_size);
@@ -471,12 +467,26 @@ fn process_reads(
         for batch in chunk_receiver {
             for (has_match, id, seq, qual) in batch {
                 if has_match {
-                    write_read(&mut matched_writer, &id, &seq, &qual, matched_filetype)?;
+                    write_read(
+                        &mut matched_writer,
+                        &id,
+                        &seq,
+                        &qual,
+                        matched_filetype,
+                        matched_stdout,
+                    )?;
 
                     matched_count.fetch_add(1, Ordering::Relaxed);
                     matched_bases.fetch_add(seq.len() as u32, Ordering::Relaxed);
                 } else {
-                    write_read(&mut unmatched_writer, &id, &seq, &qual, unmatched_filetype)?;
+                    write_read(
+                        &mut unmatched_writer,
+                        &id,
+                        &seq,
+                        &qual,
+                        unmatched_filetype,
+                        unmatched_stdout,
+                    )?;
 
                     unmatched_count.fetch_add(1, Ordering::Relaxed);
                     unmatched_bases.fetch_add(seq.len() as u32, Ordering::Relaxed);
@@ -497,6 +507,7 @@ fn process_reads(
                         &batch[i].2,
                         &batch[i].3,
                         matched_filetype,
+                        matched_stdout,
                     )?;
 
                     write_read(
@@ -505,6 +516,7 @@ fn process_reads(
                         &batch[i + 1].2,
                         &batch[i + 1].3,
                         matched_filetype,
+                        matched2_stdout,
                     )?;
 
                     matched_count.fetch_add(2, Ordering::Relaxed);
@@ -516,6 +528,7 @@ fn process_reads(
                         &batch[i].2,
                         &batch[i].3,
                         unmatched_filetype,
+                        unmatched_stdout,
                     )?;
 
                     write_read(
@@ -524,6 +537,7 @@ fn process_reads(
                         &batch[i + 1].2,
                         &batch[i + 1].3,
                         unmatched_filetype,
+                        unmatched2_stdout,
                     )?;
 
                     unmatched_count.fetch_add(2, Ordering::Relaxed);
@@ -544,6 +558,7 @@ fn process_reads(
                         &batch[i].2,
                         &batch[i].3,
                         matched_filetype,
+                        matched_stdout,
                     )?;
 
                     write_read(
@@ -552,6 +567,7 @@ fn process_reads(
                         &batch[i + 1].2,
                         &batch[i + 1].3,
                         matched_filetype,
+                        matched2_stdout,
                     )?;
 
                     matched_count.fetch_add(2, Ordering::Relaxed);
@@ -563,6 +579,7 @@ fn process_reads(
                         &batch[i].2,
                         &batch[i].3,
                         unmatched_filetype,
+                        unmatched_stdout,
                     )?;
 
                     write_read(
@@ -571,6 +588,7 @@ fn process_reads(
                         &batch[i + 1].2,
                         &batch[i + 1].3,
                         unmatched_filetype,
+                        unmatched2_stdout,
                     )?;
 
                     unmatched_count.fetch_add(2, Ordering::Relaxed);
@@ -587,6 +605,22 @@ fn process_reads(
     unmatched_writer.flush()?;
     worker_thread.join().unwrap()?;
 
+    for path in [
+        &matched_path,
+        unmatched_path,
+        matched2_path,
+        unmatched2_path,
+    ] {
+        if path.starts_with("stdout") {
+            if let Err(e) = fs::remove_file(path) {
+                // Ignore error if file doesn't exist
+                if e.kind() != io::ErrorKind::NotFound {
+                    eprintln!("Warning: Could not delete file '{}': {}", path, e);
+                }
+            }
+        }
+    }
+
     Ok((
         matched_count.load(Ordering::Relaxed),
         matched_bases.load(Ordering::Relaxed),
@@ -601,21 +635,37 @@ fn write_read(
     sequence: &[u8],
     quality: &[u8],
     format: &str,
+    stdout: bool,
 ) -> Result<(), Box<dyn Send + Sync + Error>> {
-    if format == "fa" || format == "fna" || format == "fasta" {
-        writer.write_all(b">")?;
-        writer.write_all(id)?;
-        writer.write_all(b"\n")?;
-        writer.write_all(sequence)?;
-        writer.write_all(b"\n")?;
+    if stdout {
+        unsafe {
+            if format == "fa" || format == "fna" || format == "fasta" {
+                println!(">");
+                println!("{}", str::from_utf8_unchecked(id));
+                println!("{}", str::from_utf8_unchecked(sequence));
+            } else {
+                println!(">");
+                println!("{}", str::from_utf8_unchecked(id));
+                println!("{}\n+", str::from_utf8_unchecked(sequence));
+                println!("{}", str::from_utf8_unchecked(quality));
+            }
+        }
     } else {
-        writer.write_all(b"@")?;
-        writer.write_all(id)?;
-        writer.write_all(b"\n")?;
-        writer.write_all(sequence)?;
-        writer.write_all(b"\n+\n")?;
-        writer.write_all(quality)?;
-        writer.write_all(b"\n")?;
+        if format == "fa" || format == "fna" || format == "fasta" {
+            writer.write_all(b">")?;
+            writer.write_all(id)?;
+            writer.write_all(b"\n")?;
+            writer.write_all(sequence)?;
+            writer.write_all(b"\n")?;
+        } else {
+            writer.write_all(b"@")?;
+            writer.write_all(id)?;
+            writer.write_all(b"\n")?;
+            writer.write_all(sequence)?;
+            writer.write_all(b"\n+\n")?;
+            writer.write_all(quality)?;
+            writer.write_all(b"\n")?;
+        }
     }
 
     Ok(())

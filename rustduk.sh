@@ -44,8 +44,58 @@ Contact jack.gdouglass@gmail.com for any questions or issues encountered.
 "
 }
 
+#!/usr/bin/env bash
 set -euo pipefail
+
+# Default max memory usage (85% of system memory)
+DEFAULT_MEM_PERCENT=85
+
+# Find the value following '--maxmem' in the argument list
+MAX_MEM=""
+for ((i=1; i<=$#; i++)); do
+    if [[ "${!i}" == "--maxmem" ]]; then
+        next=$((i+1))
+        MAX_MEM="${!next}"
+        break
+    fi
+done
+
+# Detect available system memory in kilobytes
+if [[ "$(uname)" == "Linux" ]]; then
+    AVAILABLE_MEM_KB=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+    AVAILABLE_MEM_BYTES=$((AVAILABLE_MEM_KB * 1024))
+elif [[ "$(uname)" == "Darwin" ]]; then
+    # macOS: get free memory in bytes
+    AVAILABLE_MEM_BYTES=$(vm_stat | awk '
+        /Pages free/ {free=$3}
+        /Pages inactive/ {inactive=$3}
+        END {print (free+inactive)*4096}
+    ')
+else
+    echo "Unsupported OS for automatic memory detection."
+    AVAILABLE_MEM_BYTES=0
+fi
+
+# If user provided memory, parse it. Otherwise, use 85% of available system memory
+if [[ -z "$MAX_MEM" ]]; then
+    LIMIT_BYTES=$((AVAILABLE_MEM_BYTES * DEFAULT_MEM_PERCENT / 100))
+else
+    # Convert human-readable input like "4G" or "800M" to bytes
+    case "$MAX_MEM" in
+        *G) LIMIT_BYTES=$(( ${MAX_MEM%G} * 1024 * 1024 * 1024 )) ;;
+        *M) LIMIT_BYTES=$(( ${MAX_MEM%M} * 1024 * 1024 )) ;;
+        *K) LIMIT_BYTES=$(( ${MAX_MEM%K} * 1024 )) ;;
+        *) LIMIT_BYTES=$MAX_MEM ;;  # Assume raw bytes
+    esac
+fi
+
+echo "Limiting memory to $LIMIT_BYTES bytes."
+
+# Set the memory limit for this shell and any processes it spawns
+if [[ "$(uname)" == "Linux" ]]; then
+    ulimit -v $((LIMIT_BYTES / 1024))
+fi
 
 echo "Running: rust-duk $@" >&2
 
-rust-duk "$@"
+./target/release/rust-duk "$@"

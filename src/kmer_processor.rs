@@ -1,3 +1,5 @@
+use std::u64;
+
 use needletail::bitkmer::canonical;
 use rustc_hash::FxHashSet;
 
@@ -21,6 +23,11 @@ impl KmerProcessor {
     pub fn process_ref(&mut self, ref_seq: &[u8]) {
         if ref_seq.len() < self.k {
             panic!("Read sequence is shorter than k");
+        }
+
+        if self.ref_kmers.is_empty() {
+            let metadata = u64::MAX ^ self.k as u64;
+            self.ref_kmers.insert(metadata);
         }
 
         let mut kmer: u64 = 0b00;
