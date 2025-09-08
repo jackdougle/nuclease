@@ -1,7 +1,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 
-# **RustDUK**  
+# **Nuclease**  
 A high-performance Rust tool for filtering sequencing reads based on reference k-mers.
 Inspired by [BBDuk](https://archive.jgi.doe.gov/data-and-tools/software-tools/bbtools/bb-tools-user-guide/bbduk-guide/) by Brian Bushnell. Provides performant and memory-efficient read processing with support for both paired and unpaired FASTA/FASTQ files, with multiple files or interleaved format.  
 
@@ -14,6 +14,10 @@ Inspired by [BBDuk](https://archive.jgi.doe.gov/data-and-tools/software-tools/bb
 - If a read sequence has at least x k-mers also found in reference dataset, it is a match
   - x is 1 by default, changed with `--minhits <int>`
 
+**Piping**:  
+- Use --in stdin.fq to pipe from stdin
+- use --outm/outu/outm2/outu2 stdout.fa/stdout.fq to pipe results to stdout
+
 **Paired reads support**:  
 - Paired inputs and outputs can be specified by adding more input/output files
 - Interleaved inputs or outputs, signify interleaved input with `--interinput`
@@ -21,7 +25,7 @@ Inspired by [BBDuk](https://archive.jgi.doe.gov/data-and-tools/software-tools/bb
 
 **Multithreading with Rayon**:  
 - Adjustable thread count via `--threads` argument  
-- Defaults to all available cores
+- Defaults to all available CPU cores
 
 **Memory Limit**:  
 - Specify maximum memory usage with `--maxmem <String>` (e.g., `5G` for 5 gigabytes, `500M` for 500 megabytes)  
@@ -30,13 +34,6 @@ Inspired by [BBDuk](https://archive.jgi.doe.gov/data-and-tools/software-tools/bb
 **Automatic Reference Indexing**:  
 - Builds a serialized reference k-mer index using Bincode if `--binref <file>` is provided from references provided with `--ref <file>`
 - Uses saved index on subsequent runs if `--binref <file>` points to a serialized hashset of kmers
-
-**Output statistics**:
-- Total reads and bases processed  
-- Matches and non-matches  
-- Processing speed (reads/sec, bases/sec)
-
-See more parameter documentation at **[./rustduk.sh](rustduk.sh)**
 
 ---
 
@@ -49,32 +46,23 @@ If using UNIX, run this command and follow the ensuing instructions:
 
 If using Windows, download the correct installer from [Rustup](https://rustup.rs/#).
 
-### **2. Clone this repository**
-```bash
-git clone https://github.com/jackdougle/rustduk.git
-cd rustduk
-```
+### **2. Download the release package**
+From the releases tab, download the latest version (currently 1.0.0 🎉).
 
-### **3. Build the project**
-Use the Rust release build for best performance:
-```bash
-cargo build --release
-```
+### **3. Run program with necessary parameters**
+Nuclease requires at least `--in`, `--ref` OR `--binref`, `--outm`, and `--outu` to be provided.
 
-The binary will be located at:
-```
-target/release/rustduk
-```
+See more parameter documentation at **[./src/main.rs](/src/main.rs)**
 
 ---
 
 ## **Example Usage**
 ```bash
-./rustduk.sh --in reads.fq --ref reference.fa --outm matched.fq --outu unmatched.fq --k 21
+nuclease --in reads.fq --ref refs.fa --outm matched.fq --outu unmatched.fq --k 21
 ```
 
 This command:
-1. Builds 21-mer index from `reference.fa` sequences
+1. Builds 21-mer index from `refs.fa` sequences
 2. Reads input reads from `reads.fq` into chunks of size 10,000
 3. Processes each read into 21-mers and checks against reference index
 4. Outputs matched reads to `matched.fq` and unmatched reads to `unmatched.fq`
@@ -127,7 +115,7 @@ Bases Processed:      150.00m bases             1000.00m bases/sec
    - Print summary at end
 
 ### **Processing Modes**
-RustDUK automatically detects the appropriate read handling mode:
+Nuclease automatically detects the appropriate read handling mode:
 
 | **Mode**                   | **Description**                                     |
 |----------------------------|-----------------------------------------------------|
@@ -139,15 +127,6 @@ RustDUK automatically detects the appropriate read handling mode:
 
 ---
 
-## **Future Features**
-
-- Piping via stdin/stdout for certain workflows  
-- K-mer metadata for serialized k-mer file to prevent mismatched k-mer size
-
-Request more by emailing jack.gdouglass@gmail.com
-
----
-
 ## **License**
 
 This project is licensed under the MIT License, see [LICENSE](LICENSE) for details. There is lots of room for improvement here so new additions or suggestions are welcome!
@@ -156,15 +135,15 @@ This project is licensed under the MIT License, see [LICENSE](LICENSE) for detai
 
 ## **Crates Used**
 
-- [Needletail](https://github.com/onecodex/needletail) — FASTA/FASTQ file reading and parsing and bitkmer operations
+- [Needletail](https://github.com/onecodex/needletail) — FASTA/FASTQ file parsing and bitkmer operations
 - [Bincode](https://sr.ht/~stygianentity/bincode/) — K-mer hashset serialization/deserialization
 - [Rayon](https://github.com/rayon-rs/rayon) — Multithreading
-- [Rustc-Hash](https://github.com/rust-lang/rustc-hash) — FxHashset for k-mer storing and comparison
+- [Rustc-Hash](https://github.com/rust-lang/rustc-hash) — FxHashset for k-mer operations
 - [Clap](https://github.com/clap-rs/clap) — CLI
-- [Num-Cpus](https://github.com/seanmonstar/num_cpus) — detection of available CPU cores
-- [Sysinfo](https://github.com/GuillaumeGomez/sysinfo) — system memory and resource information
-- [Bytesize](https://github.com/tailhook/bytesize) — human-readable byte size formatting
+- [Num-Cpus](https://github.com/seanmonstar/num_cpus) — detection of available threads
+- [Sysinfo](https://github.com/GuillaumeGomez/sysinfo) — system memory information
+- [Bytesize](https://github.com/tailhook/bytesize) — human-readable memory limit parsing
 
 ---
 
-Please email jack.gdouglass@gmail.com with any comments or questions.
+#### Please email jack.gdouglass@gmail.com with any comments, questions, or to request new features.
