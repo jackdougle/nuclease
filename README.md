@@ -52,7 +52,7 @@ If using Windows, download the correct installer from [Rustup](https://rustup.rs
 From the releases tab, download the latest version (currently 1.0.0 🎉).
 
 #### Alternatively, clone the repo, cd in, and use `cargo build --release`.
-The release binary will be located at ./target/release/nuclease-rs
+The release binary will be located at ./target/release/nuclease
 
 ### **3. Allow execution permissions**
 ```bash
