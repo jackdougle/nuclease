@@ -1,7 +1,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 
-# **<img src="./img/ferris.svg" width=50em alt="Ferris the crab" /> Nuclease** 🧬
+# **<img src="./img/ferris.png" width=50em alt="Ferris the crab" /> Nuclease** 🧬
 A high-performance Rust tool for filtering sequencing reads based on reference k-mers.
 Inspired by [BBDuk](https://archive.jgi.doe.gov/data-and-tools/software-tools/bbtools/bb-tools-user-guide/bbduk-guide/) by Brian Bushnell. Provides performant and memory-efficient read processing with support for both paired and unpaired FASTA/FASTQ files, with multiple files or interleaved format.  
 
