@@ -1,4 +1,6 @@
 use crate::kmer_processor::encode;
+#[cfg(unix)]
+use libc::{RLIM_INFINITY, RLIMIT_AS, RLIMIT_RSS, getrlimit, rlimit, setrlimit};
 use std::time::Instant;
 use wide::u8x16;
 

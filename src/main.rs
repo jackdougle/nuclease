@@ -2,8 +2,6 @@ mod duk;
 mod kmer_processor;
 
 use clap::Parser;
-#[cfg(unix)]
-use libc::{RLIM_INFINITY, RLIMIT_AS, RLIMIT_RSS, getrlimit, rlimit, setrlimit};
 use std::io;
 
 const HELP: &str = "Nuclease 1.0.0
