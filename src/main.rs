@@ -8,7 +8,7 @@ use std::io;
 
 const HELP: &str = "Nuclease 1.0.0
 Written by Jack Douglass
-Last modified September 7, 2025
+Last modified September 24, 2025
 
 Purpose: Compares DNA sequences from input file to DNA sequences from reference file
     using k-mer analysis. Splits up reference file sequences into k-mers of specified
