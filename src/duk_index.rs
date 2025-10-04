@@ -9,9 +9,9 @@ use std::mem::take;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::thread;
 use std::time::Instant;
-use std::{fs, io};
+use std::{fs, io, u32};
+use std::{thread, usize};
 
 pub fn run(args: crate::Args) -> io::Result<()> {
     let start_time = Instant::now();
@@ -298,9 +298,11 @@ fn process_reads(
     );
 
     let (chunk_sender, chunk_receiver): (
-        Sender<Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)>>,
-        Receiver<Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)>>,
+        Sender<(u32, Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)>)>,
+        Receiver<(u32, Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)>)>,
     ) = channel();
+
+    let chunk_idx = Arc::new(AtomicU32::new(0));
 
     let matched_filetype = matched_path.rsplit('.').next().unwrap_or("");
     let unmatched_filetype = unmatched_path.rsplit('.').next().unwrap_or("");
@@ -310,6 +312,7 @@ fn process_reads(
     let unmatched2_stdout = unmatched2_path == "stdout" || unmatched2_path.starts_with("stdout.");
 
     let parallel_sender = chunk_sender.clone();
+    let parellel_chunk_idx = chunk_idx.clone();
     let worker_thread = thread::spawn(move || -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut reader = if reads_path == "stdin" || reads_path.starts_with("stdin.") {
             needletail::parse_fastx_reader(io::stdin())
@@ -336,6 +339,8 @@ fn process_reads(
                     let sender = parallel_sender.clone();
                     let local_chunk = take(&mut chunk);
 
+                    let current_chunk_idx = parellel_chunk_idx.fetch_add(1, Ordering::SeqCst);
+
                     rayon::spawn(move || {
                         let processed: Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)> = local_chunk
                             .into_par_iter()
@@ -344,8 +349,7 @@ fn process_reads(
                                 (has_match, id, seq, qual)
                             })
                             .collect();
-
-                        let _ = sender.send(processed);
+                        let _ = sender.send((current_chunk_idx, processed));
                     });
                 }
             }
@@ -359,7 +363,7 @@ fn process_reads(
                     })
                     .collect();
 
-                let _ = parallel_sender.send(processed);
+                let _ = parallel_sender.send((u32::MAX, processed));
             }
         } else if process_mode == ProcessMode::Interleaved
             || process_mode == ProcessMode::InterInPairedOut
@@ -376,6 +380,7 @@ fn process_reads(
                     let processor = processor.clone();
                     let sender = parallel_sender.clone();
                     let local_chunk = take(&mut chunk);
+                    let current_chunk_idx = parellel_chunk_idx.fetch_add(1, Ordering::SeqCst);
 
                     // Process chunk in parallel
                     rayon::spawn(move || {
@@ -387,7 +392,7 @@ fn process_reads(
                             })
                             .collect();
 
-                        let _ = sender.send(processed);
+                        let _ = sender.send((current_chunk_idx, processed));
                     });
                 }
             }
@@ -401,7 +406,7 @@ fn process_reads(
                     })
                     .collect();
 
-                let _ = parallel_sender.send(processed);
+                let _ = parallel_sender.send((u32::MAX, processed));
             }
         } else if process_mode == ProcessMode::PairedInInterOut
             || process_mode == ProcessMode::Paired
@@ -427,6 +432,8 @@ fn process_reads(
                     let processor = processor.clone();
                     let sender = parallel_sender.clone();
                     let local_chunk = take(&mut chunk);
+                    let current_chunk_idx = parellel_chunk_idx.fetch_add(1, Ordering::SeqCst);
+
                     rayon::spawn(move || {
                         let processed: Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)> = local_chunk
                             .into_par_iter()
@@ -436,7 +443,7 @@ fn process_reads(
                             })
                             .collect();
 
-                        let _ = sender.send(processed);
+                        let _ = sender.send((current_chunk_idx, processed));
                     });
                 }
             }
@@ -450,7 +457,7 @@ fn process_reads(
                     })
                     .collect();
 
-                let _ = parallel_sender.send(processed);
+                let _ = parallel_sender.send((u32::MAX, processed));
             }
         }
 
@@ -458,10 +465,6 @@ fn process_reads(
     });
 
     drop(chunk_sender);
-
-    if ordered_output {
-        // sort chunks by paired index
-    }
 
     let mut matched_writer: BufWriter<File> = BufWriter::new(File::create(matched_path)?);
     let mut unmatched_writer: BufWriter<File> =
@@ -473,9 +476,18 @@ fn process_reads(
     let unmatched_count = Arc::new(AtomicU32::new(0));
     let unmatched_bases = Arc::new(AtomicU32::new(0));
 
+    let mut output_chunks = Vec::new();
+    for output_chunk in chunk_receiver {
+        output_chunks.push(output_chunk);
+    }
+
+    if ordered_output {
+        output_chunks.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+
     if process_mode == ProcessMode::Unpaired {
-        for batch in chunk_receiver {
-            for (has_match, id, seq, qual) in batch {
+        for output_chunk in output_chunks {
+            for (has_match, id, seq, qual) in output_chunk.1 {
                 if has_match {
                     write_read(
                         &mut matched_writer,
@@ -506,52 +518,54 @@ fn process_reads(
     } else if process_mode == ProcessMode::Interleaved
         || process_mode == ProcessMode::PairedInInterOut
     {
-        for batch in chunk_receiver {
-            for i in (0..batch.len() - 1).step_by(2) {
-                let has_match = batch[i].0 || batch[i + 1].0;
+        for output_chunk in output_chunks {
+            for i in (0..output_chunk.1.len() - 1).step_by(2) {
+                let has_match = output_chunk.1[i].0 || output_chunk.1[i + 1].0;
 
                 if has_match {
                     write_read(
                         &mut matched_writer,
-                        &batch[i].1,
-                        &batch[i].2,
-                        &batch[i].3,
+                        &output_chunk.1[i].1,
+                        &output_chunk.1[i].2,
+                        &output_chunk.1[i].3,
                         matched_filetype,
                         matched_stdout,
                     )?;
 
                     write_read(
                         &mut matched_writer,
-                        &batch[i + 1].1,
-                        &batch[i + 1].2,
-                        &batch[i + 1].3,
+                        &output_chunk.1[i + 1].1,
+                        &output_chunk.1[i + 1].2,
+                        &output_chunk.1[i + 1].3,
                         matched_filetype,
                         matched2_stdout,
                     )?;
 
                     matched_count.fetch_add(2, Ordering::Relaxed);
-                    matched_bases.fetch_add(batch[i].2.len() as u32 * 2, Ordering::Relaxed);
+                    matched_bases
+                        .fetch_add(output_chunk.1[i].2.len() as u32 * 2, Ordering::Relaxed);
                 } else {
                     write_read(
                         &mut unmatched_writer,
-                        &batch[i].1,
-                        &batch[i].2,
-                        &batch[i].3,
+                        &output_chunk.1[i].1,
+                        &output_chunk.1[i].2,
+                        &output_chunk.1[i].3,
                         unmatched_filetype,
                         unmatched_stdout,
                     )?;
 
                     write_read(
                         &mut unmatched_writer,
-                        &batch[i + 1].1,
-                        &batch[i + 1].2,
-                        &batch[i + 1].3,
+                        &output_chunk.1[i + 1].1,
+                        &output_chunk.1[i + 1].2,
+                        &output_chunk.1[i + 1].3,
                         unmatched_filetype,
                         unmatched2_stdout,
                     )?;
 
                     unmatched_count.fetch_add(2, Ordering::Relaxed);
-                    unmatched_bases.fetch_add(batch[i].2.len() as u32 * 2, Ordering::Relaxed);
+                    unmatched_bases
+                        .fetch_add(output_chunk.1[i].2.len() as u32 * 2, Ordering::Relaxed);
                 }
             }
         }
@@ -559,50 +573,52 @@ fn process_reads(
         let mut matched2_writer: BufWriter<File> = BufWriter::new(File::create(matched2_path)?);
         let mut unmatched2_writer: BufWriter<File> = BufWriter::new(File::create(unmatched2_path)?);
 
-        for batch in chunk_receiver {
-            for i in (0..batch.len() - 1).step_by(2) {
-                if batch[i].0 || batch[i + 1].0 {
+        for output_chunk in output_chunks {
+            for i in (0..output_chunk.1.len() - 1).step_by(2) {
+                if output_chunk.1[i].0 || output_chunk.1[i + 1].0 {
                     write_read(
                         &mut matched_writer,
-                        &batch[i].1,
-                        &batch[i].2,
-                        &batch[i].3,
+                        &output_chunk.1[i].1,
+                        &output_chunk.1[i].2,
+                        &output_chunk.1[i].3,
                         matched_filetype,
                         matched_stdout,
                     )?;
 
                     write_read(
                         &mut matched2_writer,
-                        &batch[i + 1].1,
-                        &batch[i + 1].2,
-                        &batch[i + 1].3,
+                        &output_chunk.1[i + 1].1,
+                        &output_chunk.1[i + 1].2,
+                        &output_chunk.1[i + 1].3,
                         matched_filetype,
                         matched2_stdout,
                     )?;
 
                     matched_count.fetch_add(2, Ordering::Relaxed);
-                    matched_bases.fetch_add(batch[i].2.len() as u32 * 2, Ordering::Relaxed);
+                    matched_bases
+                        .fetch_add(output_chunk.1[i].2.len() as u32 * 2, Ordering::Relaxed);
                 } else {
                     write_read(
                         &mut unmatched_writer,
-                        &batch[i].1,
-                        &batch[i].2,
-                        &batch[i].3,
+                        &output_chunk.1[i].1,
+                        &output_chunk.1[i].2,
+                        &output_chunk.1[i].3,
                         unmatched_filetype,
                         unmatched_stdout,
                     )?;
 
                     write_read(
                         &mut unmatched2_writer,
-                        &batch[i + 1].1,
-                        &batch[i + 1].2,
-                        &batch[i + 1].3,
+                        &output_chunk.1[i + 1].1,
+                        &output_chunk.1[i + 1].2,
+                        &output_chunk.1[i + 1].3,
                         unmatched_filetype,
                         unmatched2_stdout,
                     )?;
 
                     unmatched_count.fetch_add(2, Ordering::Relaxed);
-                    unmatched_bases.fetch_add(batch[i].2.len() as u32 * 2, Ordering::Relaxed);
+                    unmatched_bases
+                        .fetch_add(output_chunk.1[i].2.len() as u32 * 2, Ordering::Relaxed);
                 }
             }
         }

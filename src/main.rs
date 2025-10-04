@@ -1,12 +1,12 @@
-mod duk;
+mod duk_index;
 mod kmer_processor;
 
 use clap::Parser;
 use std::io;
 
-const HELP: &str = "Nuclease 1.0.0
+const ABOUT: &str = "Nuclease 1.0.3
 Written by Jack Douglass
-Last modified September 24, 2025
+Last modified October 4, 2025
 
 Purpose: Compares DNA sequences from input file to DNA sequences from reference file
     using k-mer analysis. Splits up reference file sequences into k-mers of specified
@@ -48,35 +48,40 @@ Memory & Performance Parameters
                         memory by default. '--maxmem 5G' will specify 5 gigabytes,
                         '--maxmem 200M' will specify 200 megabytes. Memory limiting is
                         only available on Linux.
-    --interleaved       Enable flag to input as interleaved paired-end reads, omit flag
+    --interinput        Enable flag to input as interleaved paired-end reads, omit flag
                         for unpaired reads.
+    --order             Enable flag to get read outputs ordered by sequence ID.
 
 Function and usage documentation at ./README.md
 Contact jack.gdouglass@gmail.com for any questions or issues encountered.
 ";
 
 #[derive(Parser)]
-#[command(version, before_help = "A fast DNA decontamination Rust program using k-mers", long_about = HELP)]
+#[command(version, before_help = "Fast DNA decontamination Rust program using k-mers", long_about = ABOUT)]
 struct Args {
-    /// Amount of bases in a k-mer
-    #[arg(long)]
+    /// Amount of bases in a k-me
+    #[arg(short, long)]
     k: Option<usize>,
+
+    /// Max amount of threads to use
+    #[arg(short, long)]
+    threads: Option<usize>,
 
     /// Min number of k-mer hits to match a read
     #[arg(long)]
     minhits: Option<u8>,
-
-    /// Max amount of threads to use
-    #[arg(long)]
-    threads: Option<usize>,
 
     /// Memory cap in human-readable format
     #[arg(long)]
     maxmem: Option<String>,
 
     /// FASTA/FASTQ path for reference sequences
-    #[arg(long)]
+    #[arg(short, long)]
     r#ref: String,
+
+    /// Binary file containing serialized ref k-mers
+    #[arg(short, long)]
+    binref: Option<String>,
 
     /// FASTA/FASTQ path for read sequences
     #[arg(long)]
@@ -85,10 +90,6 @@ struct Args {
     /// FASTA/FASTQ path for 2nd pair of reads
     #[arg(long)]
     in2: Option<String>,
-
-    /// Binary file containing serialized ref k-mers
-    #[arg(long)]
-    binref: Option<String>,
 
     /// Output file of matched reads
     #[arg(long)]
@@ -107,14 +108,18 @@ struct Args {
     outu2: Option<String>,
 
     /// Enabling flag signals interleaved input
-    #[arg(long)]
+    #[arg(short, long)]
     interinput: bool,
+
+    /// Enabling flag causes ordered output
+    #[arg(short, long)]
+    order: bool,
 }
 
 fn main() -> io::Result<()> {
     let args = Args::parse();
 
-    duk::run(args)?;
+    duk_index::run(args)?;
 
     Ok(())
 }
