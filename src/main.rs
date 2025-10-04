@@ -1,3 +1,4 @@
+mod duk;
 mod duk_index;
 mod kmer_processor;
 

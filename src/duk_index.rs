@@ -306,6 +306,8 @@ fn process_reads(
 
     let matched_filetype = matched_path.rsplit('.').next().unwrap_or("");
     let unmatched_filetype = unmatched_path.rsplit('.').next().unwrap_or("");
+    let matched2_filetype = matched2_path.rsplit('.').next().unwrap_or("");
+    let unmatched2_filetype = unmatched2_path.rsplit('.').next().unwrap_or("");
     let matched_stdout = matched_path == "stdout" || matched_path.starts_with("stdout.");
     let unmatched_stdout = unmatched_path == "stdout" || unmatched_path.starts_with("stdout.");
     let matched2_stdout = matched2_path == "stdout" || matched2_path.starts_with("stdout.");
@@ -537,7 +539,7 @@ fn process_reads(
                         &output_chunk.1[i + 1].1,
                         &output_chunk.1[i + 1].2,
                         &output_chunk.1[i + 1].3,
-                        matched_filetype,
+                        matched2_filetype,
                         matched2_stdout,
                     )?;
 
@@ -653,6 +655,164 @@ fn process_reads(
         unmatched_count.load(Ordering::Relaxed),
         unmatched_bases.load(Ordering::Relaxed),
     ))
+}
+
+fn process_output_chunks(
+    chunks_iterator: impl Iterator<Item = (u32, Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)>)>,
+    m_writer: &mut BufWriter<File>,
+    m_count: AtomicU32,
+    m_bases: AtomicU32,
+    m_filetype: &str,
+    m_stdout: bool,
+    m2_path: &str,
+    m2_filetype: &str,
+    m2_stdout: bool,
+    u_writer: &mut BufWriter<File>,
+    u_count: AtomicU32,
+    u_bases: AtomicU32,
+    u_filetype: &str,
+    u_stdout: bool,
+    u2_path: &str,
+    u2_filetype: &str,
+    u2_stdout: bool,
+    process_mode: ProcessMode,
+) -> Result<(AtomicU32, AtomicU32, AtomicU32, AtomicU32), Box<dyn Send + Sync + Error>> {
+    if process_mode == ProcessMode::Unpaired {
+        for (_, chunk) in chunks_iterator {
+            for (has_match, id, seq, qual) in chunk {
+                if has_match {
+                    write_read(m_writer, &id, &seq, &qual, m_filetype, m_stdout)?;
+
+                    m_count.fetch_add(1, Ordering::Relaxed);
+                    m_bases.fetch_add(seq.len() as u32, Ordering::Relaxed);
+                } else {
+                    write_read(u_writer, &id, &seq, &qual, u_filetype, u_stdout)?;
+
+                    u_count.fetch_add(1, Ordering::Relaxed);
+                    u_count.fetch_add(seq.len() as u32, Ordering::Relaxed);
+                }
+            }
+        }
+    } else if process_mode == ProcessMode::Interleaved
+        || process_mode == ProcessMode::PairedInInterOut
+    {
+        for (_, chunk) in chunks_iterator {
+            for i in (0..chunk.len() - 1).step_by(2) {
+                let has_match = chunk[i].0 || chunk[i + 1].0;
+
+                if has_match {
+                    write_read(
+                        m_writer,
+                        &chunk[i].1,
+                        &chunk[i].2,
+                        &chunk[i].3,
+                        m_filetype,
+                        m_stdout,
+                    )?;
+
+                    write_read(
+                        m_writer,
+                        &chunk[i + 1].1,
+                        &chunk[i + 1].2,
+                        &chunk[i + 1].3,
+                        m_filetype,
+                        m_stdout,
+                    )?;
+
+                    m_count.fetch_add(2, Ordering::Relaxed);
+                    m_bases.fetch_add(
+                        (chunk[i].2.len() + chunk[i + 1].2.len()) as u32,
+                        Ordering::Relaxed,
+                    );
+                } else {
+                    write_read(
+                        u_writer,
+                        &chunk[i].1,
+                        &chunk[i].2,
+                        &chunk[i].3,
+                        u_filetype,
+                        u_stdout,
+                    )?;
+
+                    write_read(
+                        u_writer,
+                        &chunk[i + 1].1,
+                        &chunk[i + 1].2,
+                        &chunk[i + 1].3,
+                        u_filetype,
+                        u_stdout,
+                    )?;
+
+                    u_count.fetch_add(2, Ordering::Relaxed);
+                    u_bases.fetch_add(
+                        (chunk[i].2.len() + chunk[i + 1].2.len()) as u32,
+                        Ordering::Relaxed,
+                    );
+                }
+            }
+        }
+    } else if process_mode == ProcessMode::InterInPairedOut || process_mode == ProcessMode::Paired {
+        let mut m2_writer: BufWriter<File> = BufWriter::new(File::create(m2_path)?);
+        let mut u2_writer: BufWriter<File> = BufWriter::new(File::create(u2_path)?);
+
+        for (_, chunk) in chunks_iterator {
+            for i in (0..chunk.len() - 1).step_by(2) {
+                let has_match = chunk[i].0 || chunk[i + 1].0;
+
+                if has_match {
+                    write_read(
+                        m_writer,
+                        &chunk[i].1,
+                        &chunk[i].2,
+                        &chunk[i].3,
+                        m_filetype,
+                        m_stdout,
+                    )?;
+
+                    write_read(
+                        &mut m2_writer,
+                        &chunk[i + 1].1,
+                        &chunk[i + 1].2,
+                        &chunk[i + 1].3,
+                        m2_filetype,
+                        m2_stdout,
+                    )?;
+
+                    m_count.fetch_add(2, Ordering::Relaxed);
+                    m_bases.fetch_add(
+                        (chunk[i].2.len() + chunk[i + 1].2.len()) as u32,
+                        Ordering::Relaxed,
+                    );
+                } else {
+                    write_read(
+                        u_writer,
+                        &chunk[i].1,
+                        &chunk[i].2,
+                        &chunk[i].3,
+                        u_filetype,
+                        u_stdout,
+                    )?;
+
+                    write_read(
+                        &mut u2_writer,
+                        &chunk[i + 1].1,
+                        &chunk[i + 1].2,
+                        &chunk[i + 1].3,
+                        u2_filetype,
+                        u2_stdout,
+                    )?;
+
+                    u_count.fetch_add(2, Ordering::Relaxed);
+                    u_bases.fetch_add(
+                        (chunk[i].2.len() + chunk[i + 1].2.len()) as u32,
+                        Ordering::Relaxed,
+                    );
+                }
+            }
+        }
+    }
+
+    Ok((m_count, m_bases, u_count, u_bases))
 }
 
 fn write_read(
