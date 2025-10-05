@@ -478,161 +478,67 @@ fn process_reads(
     let unmatched_count = Arc::new(AtomicU32::new(0));
     let unmatched_bases = Arc::new(AtomicU32::new(0));
 
-    let mut output_chunks = Vec::new();
-    for output_chunk in chunk_receiver {
-        output_chunks.push(output_chunk);
-    }
+    let m_count;
+    let m_bases;
+    let u_count;
+    let u_bases;
 
     if ordered_output {
+        let mut output_chunks = Vec::new();
+        for output_chunk in chunk_receiver {
+            output_chunks.push(output_chunk);
+        }
+
         output_chunks.sort_by(|a, b| a.0.cmp(&b.0));
-    }
 
-    if process_mode == ProcessMode::Unpaired {
-        for output_chunk in output_chunks {
-            for (has_match, id, seq, qual) in output_chunk.1 {
-                if has_match {
-                    write_read(
-                        &mut matched_writer,
-                        &id,
-                        &seq,
-                        &qual,
-                        matched_filetype,
-                        matched_stdout,
-                    )?;
-
-                    matched_count.fetch_add(1, Ordering::Relaxed);
-                    matched_bases.fetch_add(seq.len() as u32, Ordering::Relaxed);
-                } else {
-                    write_read(
-                        &mut unmatched_writer,
-                        &id,
-                        &seq,
-                        &qual,
-                        unmatched_filetype,
-                        unmatched_stdout,
-                    )?;
-
-                    unmatched_count.fetch_add(1, Ordering::Relaxed);
-                    unmatched_bases.fetch_add(seq.len() as u32, Ordering::Relaxed);
-                }
-            }
-        }
-    } else if process_mode == ProcessMode::Interleaved
-        || process_mode == ProcessMode::PairedInInterOut
-    {
-        for output_chunk in output_chunks {
-            for i in (0..output_chunk.1.len() - 1).step_by(2) {
-                let has_match = output_chunk.1[i].0 || output_chunk.1[i + 1].0;
-
-                if has_match {
-                    write_read(
-                        &mut matched_writer,
-                        &output_chunk.1[i].1,
-                        &output_chunk.1[i].2,
-                        &output_chunk.1[i].3,
-                        matched_filetype,
-                        matched_stdout,
-                    )?;
-
-                    write_read(
-                        &mut matched_writer,
-                        &output_chunk.1[i + 1].1,
-                        &output_chunk.1[i + 1].2,
-                        &output_chunk.1[i + 1].3,
-                        matched2_filetype,
-                        matched2_stdout,
-                    )?;
-
-                    matched_count.fetch_add(2, Ordering::Relaxed);
-                    matched_bases
-                        .fetch_add(output_chunk.1[i].2.len() as u32 * 2, Ordering::Relaxed);
-                } else {
-                    write_read(
-                        &mut unmatched_writer,
-                        &output_chunk.1[i].1,
-                        &output_chunk.1[i].2,
-                        &output_chunk.1[i].3,
-                        unmatched_filetype,
-                        unmatched_stdout,
-                    )?;
-
-                    write_read(
-                        &mut unmatched_writer,
-                        &output_chunk.1[i + 1].1,
-                        &output_chunk.1[i + 1].2,
-                        &output_chunk.1[i + 1].3,
-                        unmatched_filetype,
-                        unmatched2_stdout,
-                    )?;
-
-                    unmatched_count.fetch_add(2, Ordering::Relaxed);
-                    unmatched_bases
-                        .fetch_add(output_chunk.1[i].2.len() as u32 * 2, Ordering::Relaxed);
-                }
-            }
-        }
-    } else if process_mode == ProcessMode::InterInPairedOut || process_mode == ProcessMode::Paired {
-        let mut matched2_writer: BufWriter<File> = BufWriter::new(File::create(matched2_path)?);
-        let mut unmatched2_writer: BufWriter<File> = BufWriter::new(File::create(unmatched2_path)?);
-
-        for output_chunk in output_chunks {
-            for i in (0..output_chunk.1.len() - 1).step_by(2) {
-                if output_chunk.1[i].0 || output_chunk.1[i + 1].0 {
-                    write_read(
-                        &mut matched_writer,
-                        &output_chunk.1[i].1,
-                        &output_chunk.1[i].2,
-                        &output_chunk.1[i].3,
-                        matched_filetype,
-                        matched_stdout,
-                    )?;
-
-                    write_read(
-                        &mut matched2_writer,
-                        &output_chunk.1[i + 1].1,
-                        &output_chunk.1[i + 1].2,
-                        &output_chunk.1[i + 1].3,
-                        matched_filetype,
-                        matched2_stdout,
-                    )?;
-
-                    matched_count.fetch_add(2, Ordering::Relaxed);
-                    matched_bases
-                        .fetch_add(output_chunk.1[i].2.len() as u32 * 2, Ordering::Relaxed);
-                } else {
-                    write_read(
-                        &mut unmatched_writer,
-                        &output_chunk.1[i].1,
-                        &output_chunk.1[i].2,
-                        &output_chunk.1[i].3,
-                        unmatched_filetype,
-                        unmatched_stdout,
-                    )?;
-
-                    write_read(
-                        &mut unmatched2_writer,
-                        &output_chunk.1[i + 1].1,
-                        &output_chunk.1[i + 1].2,
-                        &output_chunk.1[i + 1].3,
-                        unmatched_filetype,
-                        unmatched2_stdout,
-                    )?;
-
-                    unmatched_count.fetch_add(2, Ordering::Relaxed);
-                    unmatched_bases
-                        .fetch_add(output_chunk.1[i].2.len() as u32 * 2, Ordering::Relaxed);
-                }
-            }
-        }
-
-        matched2_writer.flush()?;
-        unmatched2_writer.flush()?;
+        (m_count, m_bases, u_count, u_bases) = process_output_chunks(
+            output_chunks.into_iter(),
+            &mut matched_writer,
+            matched_count,
+            matched_bases,
+            matched_filetype,
+            matched_stdout,
+            matched2_path,
+            matched2_filetype,
+            matched2_stdout,
+            &mut unmatched_writer,
+            unmatched_count,
+            unmatched_bases,
+            unmatched_filetype,
+            unmatched_stdout,
+            unmatched2_path,
+            unmatched2_filetype,
+            unmatched2_stdout,
+            process_mode,
+        )?;
+    } else {
+        (m_count, m_bases, u_count, u_bases) = process_output_chunks(
+            chunk_receiver.into_iter(),
+            &mut matched_writer,
+            matched_count,
+            matched_bases,
+            matched_filetype,
+            matched_stdout,
+            matched2_path,
+            matched2_filetype,
+            matched2_stdout,
+            &mut unmatched_writer,
+            unmatched_count,
+            unmatched_bases,
+            unmatched_filetype,
+            unmatched_stdout,
+            unmatched2_path,
+            unmatched2_filetype,
+            unmatched_stdout,
+            process_mode,
+        )?;
     }
 
     matched_writer.flush()?;
     unmatched_writer.flush()?;
     worker_thread.join().unwrap()?;
 
+    // delete file is stdout is input
     for path in [
         &matched_path,
         unmatched_path,
@@ -649,34 +555,29 @@ fn process_reads(
         }
     }
 
-    Ok((
-        matched_count.load(Ordering::Relaxed),
-        matched_bases.load(Ordering::Relaxed),
-        unmatched_count.load(Ordering::Relaxed),
-        unmatched_bases.load(Ordering::Relaxed),
-    ))
+    Ok((m_count, m_bases, u_count, u_bases))
 }
 
 fn process_output_chunks(
     chunks_iterator: impl Iterator<Item = (u32, Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)>)>,
     m_writer: &mut BufWriter<File>,
-    m_count: AtomicU32,
-    m_bases: AtomicU32,
+    m_count: Arc<AtomicU32>,
+    m_bases: Arc<AtomicU32>,
     m_filetype: &str,
     m_stdout: bool,
     m2_path: &str,
     m2_filetype: &str,
     m2_stdout: bool,
     u_writer: &mut BufWriter<File>,
-    u_count: AtomicU32,
-    u_bases: AtomicU32,
+    u_count: Arc<AtomicU32>,
+    u_bases: Arc<AtomicU32>,
     u_filetype: &str,
     u_stdout: bool,
     u2_path: &str,
     u2_filetype: &str,
     u2_stdout: bool,
     process_mode: ProcessMode,
-) -> Result<(AtomicU32, AtomicU32, AtomicU32, AtomicU32), Box<dyn Send + Sync + Error>> {
+) -> Result<(u32, u32, u32, u32), Box<dyn Send + Sync + Error>> {
     if process_mode == ProcessMode::Unpaired {
         for (_, chunk) in chunks_iterator {
             for (has_match, id, seq, qual) in chunk {
@@ -689,7 +590,7 @@ fn process_output_chunks(
                     write_read(u_writer, &id, &seq, &qual, u_filetype, u_stdout)?;
 
                     u_count.fetch_add(1, Ordering::Relaxed);
-                    u_count.fetch_add(seq.len() as u32, Ordering::Relaxed);
+                    u_bases.fetch_add(seq.len() as u32, Ordering::Relaxed);
                 }
             }
         }
@@ -810,9 +711,17 @@ fn process_output_chunks(
                 }
             }
         }
+
+        m2_writer.flush()?;
+        u2_writer.flush()?;
     }
 
-    Ok((m_count, m_bases, u_count, u_bases))
+    Ok((
+        m_count.load(Ordering::Relaxed),
+        m_bases.load(Ordering::Relaxed),
+        u_count.load(Ordering::Relaxed),
+        u_bases.load(Ordering::Relaxed),
+    ))
 }
 
 fn write_read(
