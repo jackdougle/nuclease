@@ -54,7 +54,7 @@ brew install nuclease
 ```
 
 ### **3. Run program with necessary parameters**
-Nuclease requires at least `--in`, `--ref` or `--binref`, `--outm`, and `--outu` to be provided.
+Nuclease requires at least `--in` and `--ref` to be provided.
    - Providing both ref arguments is generally best for performance and redundance
 
 See more parameter documentation at **[./src/main.rs](/src/main.rs)**

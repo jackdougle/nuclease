@@ -3,6 +3,7 @@ mod kmer_processor;
 
 use clap::Parser;
 use std::io;
+use std::time::Instant;
 
 const ABOUT: &str = "Nuclease 1.0.3
 Written by Jack Douglass
@@ -46,7 +47,7 @@ MEMORY & PERFORMANCE PARAMETERS
                         from 1-31, larger k-mers will have less matches.
     --minhits 1         Minimum number of k-mer matches a read sequence must
                         have to be considered a match.
-    -t --threads auto   (-t) Number of threads to use for parallel processing.
+    --threads auto      (-t) Number of threads to use for parallel processing.
                         Program will use all available threads by default.
     --maxmem auto       (-m) Maximum memory to use. Program will use ~50% of
                         available memory by default. '--maxmem 5G' will specify
@@ -102,11 +103,11 @@ struct Args {
 
     /// Output file of matched reads
     #[arg(long)]
-    outm: String,
+    outm: Option<String>,
 
     /// Output file of unmatched reads
     #[arg(long)]
-    outu: String,
+    outu: Option<String>,
 
     /// Output file for second pair of matched reads
     #[arg(long)]
@@ -126,9 +127,46 @@ struct Args {
 }
 
 fn main() -> io::Result<()> {
+    let start_time = Instant::now();
     let args = Args::parse();
 
-    duk::run(args)?;
+    validate_args(&args)?;
+
+    duk::run(args, start_time)?;
+
+    Ok(())
+}
+
+fn validate_args(args: &Args) -> io::Result<()> {
+    // Check input files aren't the same
+    if let Some(ref in2) = args.in2 {
+        if args.r#in == *in2 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "both inputs (--in and --in2) cannot be the same file",
+            ));
+        }
+    }
+
+    // Check output files aren't the same (if provided)
+    if let (Some(outm), Some(outu)) = (&args.outm, &args.outu) {
+        if outm == outu {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "matches (--outm) and non-matches (--outu) cannot have the same output path",
+            ));
+        }
+    }
+
+    // Check paired outputs if provided and that they aren't the same
+    if let (Some(outm2), Some(outu2)) = (&args.outm2, &args.outu2) {
+        if outm2 == outu2 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Matches (--outm2) and non-matches (--outu2) cannot have the same output path",
+            ));
+        }
+    }
 
     Ok(())
 }

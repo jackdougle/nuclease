@@ -13,29 +13,20 @@ use std::time::Instant;
 use std::{fs, io, u32};
 use std::{thread, usize};
 
-pub fn run(args: crate::Args) -> io::Result<()> {
-    let start_time = Instant::now();
+pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
     let available_threads = num_cpus::get();
 
+    // First set of variables: reference indexing parameters
     let num_threads = args
         .threads
         .unwrap_or(available_threads)
         .min(available_threads);
-
-    let in_path = args.r#in;
-    let in2_path = args.in2.unwrap_or_default();
-    let ref_path = args.r#ref;
-    let bin_kmers_path = &args.binref.unwrap_or_default();
-
-    let outm_path = args.outm;
-    let outu_path = args.outu;
-    let outm2_path = args.outm2.unwrap_or_default();
-    let outu2_path = args.outu2.unwrap_or_default();
-
     let k = args.k.unwrap_or(21);
     let min_hits = args.minhits.unwrap_or(1);
-    let interleaved_input = args.interinput;
     let ordered_output = args.order;
+
+    let ref_path = args.r#ref;
+    let bin_kmers_path = &args.binref.unwrap_or_default();
 
     let mut kmer_processor = KmerProcessor::new(k, min_hits);
 
@@ -72,15 +63,28 @@ pub fn run(args: crate::Args) -> io::Result<()> {
 
     let indexing_time = start_time.elapsed().as_secs_f32();
     println!("Indexing time:\t\t{:.3} seconds\n", indexing_time);
-    println!(
-        "Processing reads from {} using {} threads",
-        in_path, num_threads
-    );
 
     rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
         .build_global()
         .expect("Could not build Rayon Pool with specified thread amount");
+
+    let process_mode = detect_mode(&args.in2, &args.outm2, &args.outu2, args.interinput);
+
+    // Second set of variables: read processing I/O
+    let in_path = args.r#in;
+    let in2_path = args.in2.unwrap_or_default();
+
+    let outm_path = args.outm.unwrap_or(String::from("/dev/null"));
+    let outu_path = args.outu.unwrap_or(String::from("/dev/null"));
+
+    let outm2_path = args.outm2.unwrap_or(String::from("/dev/null"));
+    let outu2_path = args.outu2.unwrap_or(String::from("/dev/null"));
+
+    println!(
+        "Using {} threads to process reads from {}",
+        num_threads, in_path
+    );
 
     match process_reads(
         in_path,
@@ -90,7 +94,7 @@ pub fn run(args: crate::Args) -> io::Result<()> {
         &outu_path,
         &outm2_path,
         &outu2_path,
-        interleaved_input,
+        process_mode,
         ordered_output,
     ) {
         Ok((mseq_count, mbase_count, useq_count, ubase_count)) => {
@@ -224,54 +228,43 @@ enum ProcessMode {
 }
 
 fn detect_mode(
-    reads2_path: &str,
-    matched2_path: &str,
-    unmatched2_path: &str,
+    reads2_path: &Option<String>,
+    matched2_path: &Option<String>,
+    unmatched2_path: &Option<String>,
     interleaved_input: bool,
 ) -> ProcessMode {
-    if !reads2_path.is_empty() {
+    if reads2_path.is_some() {
         assert!(
             !interleaved_input,
-            "Please disable the --interleaved flag if providing 2 input files"
+            "Please disable the --interinput flag if providing 2 input files"
         );
-        if matched2_path.is_empty() && unmatched2_path.is_empty() {
+        if matched2_path.is_none() && unmatched2_path.is_none() {
             println!(
                 "Forcing interleaved output because paired input was specified for single output files"
             );
             ProcessMode::PairedInInterOut
         } else {
             assert!(
-                !matched2_path.is_empty(),
+                matched2_path.is_some(),
                 "Please add a second matched output path using: --outm2 <file>"
             );
             assert!(
-                !unmatched2_path.is_empty(),
+                unmatched2_path.is_some(),
                 "Please add a second unmatched output path using: --outu2 <file>"
             );
             println!("Input and output is processed as paired");
             ProcessMode::Paired
         }
     } else if interleaved_input {
-        if matched2_path.is_empty() && unmatched2_path.is_empty() {
+        if matched2_path.is_none() && unmatched2_path.is_none() {
             println!("Input and output is processed as interleaved");
             ProcessMode::Interleaved
         } else {
-            assert!(
-                !matched2_path.is_empty(),
-                "Please add a second matched output path using: --outm2 <file>"
-            );
-            assert!(
-                !unmatched2_path.is_empty(),
-                "Please add a second unmatched output path using: --outu2 <file>"
-            );
             println!("Processing interleaved input and paired output");
             ProcessMode::InterInPairedOut
         }
-    } else if !matched2_path.is_empty() && !unmatched2_path.is_empty() {
-        println!(
-            "Forcing interleaved input because paired output was specified for a single input file"
-        );
-        ProcessMode::InterInPairedOut
+    } else if matched2_path.is_some() || unmatched2_path.is_some() {
+        panic!("Please enable the --interinput flag for 1 input file with paired output files");
     } else {
         println!("Input and output are processed as unpaired");
         ProcessMode::Unpaired
@@ -286,16 +279,10 @@ fn process_reads(
     unmatched_path: &str,
     matched2_path: &str,
     unmatched2_path: &str,
-    interleaved_input: bool,
+    process_mode: ProcessMode,
     ordered_output: bool,
 ) -> Result<(u32, u32, u32, u32), Box<dyn Error + Send + Sync>> {
     let processor = Arc::new(processor);
-    let process_mode = detect_mode(
-        &reads2_path,
-        matched2_path,
-        unmatched2_path,
-        interleaved_input,
-    );
 
     let (chunk_sender, chunk_receiver): (
         Sender<(u32, Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)>)>,
