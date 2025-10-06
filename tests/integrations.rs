@@ -4,9 +4,6 @@ use std::fs::{self, File};
 use std::io::Write;
 use tempfile::TempDir;
 
-// Tests to add:
-// Using every arg possible perhaps (besides maxmem)
-
 // Helper function to create test FASTQ files
 fn create_fastq(path: &str, records: &[(&str, &str, &str)]) -> std::io::Result<()> {
     let mut file = File::create(path)?;
@@ -92,12 +89,9 @@ fn test_basic_filtering_unpaired() {
 fn test_interleaved() {
     let temp = TempDir::new().unwrap();
     let ref_path = temp.path().join("ref.fa");
-    let reads1_path = temp.path().join("reads1.fq");
-    let reads2_path = temp.path().join("reads2.fq");
-    let matched1_path = temp.path().join("matched1.fq");
-    let matched2_path = temp.path().join("matched2.fq");
-    let unmatched1_path = temp.path().join("unmatched1.fq");
-    let unmatched2_path = temp.path().join("unmatched2.fq");
+    let reads_path = temp.path().join("reads1.fq");
+    let matched_path = temp.path().join("matched1.fq");
+    let unmatched_path = temp.path().join("unmatched1.fq");
 
     create_fasta(
         ref_path.to_str().unwrap(),
@@ -106,19 +100,12 @@ fn test_interleaved() {
     .unwrap();
 
     create_fastq(
-        reads1_path.to_str().unwrap(),
+        reads_path.to_str().unwrap(),
         &[
-            ("read1/1", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"),
-            ("read2/1", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"),
-        ],
-    )
-    .unwrap();
-
-    create_fastq(
-        reads2_path.to_str().unwrap(),
-        &[
-            ("read1/2", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"),
-            ("read2/2", "GGGGGGGGGGGGGGGGGGGGG", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read1", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read2", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read3", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read4", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"),
         ],
     )
     .unwrap();
@@ -126,32 +113,37 @@ fn test_interleaved() {
     Command::cargo_bin("nuclease")
         .unwrap()
         .arg("--in")
-        .arg(reads1_path.to_str().unwrap())
-        .arg("--in2")
-        .arg(reads2_path.to_str().unwrap())
+        .arg(reads_path.to_str().unwrap())
         .arg("--ref")
         .arg(ref_path.to_str().unwrap())
         .arg("--outm")
-        .arg(matched1_path.to_str().unwrap())
-        .arg("--outm2")
-        .arg(matched2_path.to_str().unwrap())
+        .arg(matched_path.to_str().unwrap())
         .arg("--outu")
-        .arg(unmatched1_path.to_str().unwrap())
-        .arg("--outu2")
-        .arg(unmatched2_path.to_str().unwrap())
+        .arg(unmatched_path.to_str().unwrap())
+        .arg("--interinput")
         .assert()
         .success();
 
-    assert!(matched1_path.exists());
-    assert!(matched2_path.exists());
+    assert!(matched_path.exists());
+
+    let matched_content = fs::read_to_string(&matched_path).unwrap();
+    assert!(matched_content.contains("read1"));
+    assert!(matched_content.contains("ACGTACGTACGTACGTACGTA"));
+    assert!(matched_content.contains("read2"));
+    assert!(matched_content.contains("TTTTTTTTTTTTTTTTTTTTT"));
+
+    let unmatched_content = fs::read_to_string(&unmatched_path).unwrap();
+    assert!(unmatched_content.contains("read3"));
+    assert!(unmatched_content.contains("TTTTTTTTTTTTTTTTTTTTT"));
+    assert!(unmatched_content.contains("read4"));
+    assert!(unmatched_content.contains("TTTTTTTTTTTTTTTTTTTTT"));
 }
 
 #[test]
 fn test_inter_in_paired_out() {
     let temp = TempDir::new().unwrap();
     let ref_path = temp.path().join("ref.fa");
-    let reads1_path = temp.path().join("reads1.fq");
-    let reads2_path = temp.path().join("reads2.fq");
+    let reads_path = temp.path().join("reads1.fq");
     let matched1_path = temp.path().join("matched1.fq");
     let matched2_path = temp.path().join("matched2.fq");
     let unmatched1_path = temp.path().join("unmatched1.fq");
@@ -164,19 +156,12 @@ fn test_inter_in_paired_out() {
     .unwrap();
 
     create_fastq(
-        reads1_path.to_str().unwrap(),
+        reads_path.to_str().unwrap(),
         &[
-            ("read1/1", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"),
-            ("read2/1", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"),
-        ],
-    )
-    .unwrap();
-
-    create_fastq(
-        reads2_path.to_str().unwrap(),
-        &[
-            ("read1/2", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"),
-            ("read2/2", "GGGGGGGGGGGGGGGGGGGGG", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read1", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read2", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read3", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read4", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"),
         ],
     )
     .unwrap();
@@ -184,9 +169,7 @@ fn test_inter_in_paired_out() {
     Command::cargo_bin("nuclease")
         .unwrap()
         .arg("--in")
-        .arg(reads1_path.to_str().unwrap())
-        .arg("--in2")
-        .arg(reads2_path.to_str().unwrap())
+        .arg(reads_path.to_str().unwrap())
         .arg("--ref")
         .arg(ref_path.to_str().unwrap())
         .arg("--outm")
@@ -197,11 +180,28 @@ fn test_inter_in_paired_out() {
         .arg(unmatched1_path.to_str().unwrap())
         .arg("--outu2")
         .arg(unmatched2_path.to_str().unwrap())
+        .arg("--interinput")
         .assert()
         .success();
 
     assert!(matched1_path.exists());
     assert!(matched2_path.exists());
+
+    let matched1_content = fs::read_to_string(&matched1_path).unwrap();
+    assert!(matched1_content.contains("read1"));
+    assert!(matched1_content.contains("ACGTACGTACGTACGTACGTA"));
+
+    let matched2_content = fs::read_to_string(&matched2_path).unwrap();
+    assert!(matched2_content.contains("read2"));
+    assert!(matched2_content.contains("TTTTTTTTTTTTTTTTTTTTT"));
+
+    let unmatched1_content = fs::read_to_string(&unmatched1_path).unwrap();
+    assert!(unmatched1_content.contains("read3"));
+    assert!(unmatched1_content.contains("TTTTTTTTTTTTTTTTTTTTT"));
+
+    let unmatched2_content = fs::read_to_string(&unmatched2_path).unwrap();
+    assert!(unmatched2_content.contains("read4"));
+    assert!(unmatched2_content.contains("TTTTTTTTTTTTTTTTTTTTT"));
 }
 
 #[test]
@@ -210,10 +210,8 @@ fn test_paired_in_inter_out() {
     let ref_path = temp.path().join("ref.fa");
     let reads1_path = temp.path().join("reads1.fq");
     let reads2_path = temp.path().join("reads2.fq");
-    let matched1_path = temp.path().join("matched1.fq");
-    let matched2_path = temp.path().join("matched2.fq");
-    let unmatched1_path = temp.path().join("unmatched1.fq");
-    let unmatched2_path = temp.path().join("unmatched2.fq");
+    let matched_path = temp.path().join("matched1.fq");
+    let unmatched_path = temp.path().join("unmatched1.fq");
 
     create_fasta(
         ref_path.to_str().unwrap(),
@@ -224,8 +222,8 @@ fn test_paired_in_inter_out() {
     create_fastq(
         reads1_path.to_str().unwrap(),
         &[
-            ("read1/1", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"),
-            ("read2/1", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read1", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read3", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"),
         ],
     )
     .unwrap();
@@ -233,8 +231,8 @@ fn test_paired_in_inter_out() {
     create_fastq(
         reads2_path.to_str().unwrap(),
         &[
-            ("read1/2", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"),
-            ("read2/2", "GGGGGGGGGGGGGGGGGGGGG", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read2", "CCCCCCCCCCCCCCCCCCCCC", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read4", "GGGGGGGGGGGGGGGGGGGGG", "IIIIIIIIIIIIIIIIIIIII"),
         ],
     )
     .unwrap();
@@ -248,18 +246,26 @@ fn test_paired_in_inter_out() {
         .arg("--ref")
         .arg(ref_path.to_str().unwrap())
         .arg("--outm")
-        .arg(matched1_path.to_str().unwrap())
-        .arg("--outm2")
-        .arg(matched2_path.to_str().unwrap())
+        .arg(matched_path.to_str().unwrap())
         .arg("--outu")
-        .arg(unmatched1_path.to_str().unwrap())
-        .arg("--outu2")
-        .arg(unmatched2_path.to_str().unwrap())
+        .arg(unmatched_path.to_str().unwrap())
         .assert()
         .success();
 
-    assert!(matched1_path.exists());
-    assert!(matched2_path.exists());
+    assert!(matched_path.exists());
+    assert!(matched_path.exists());
+
+    let matched_content = fs::read_to_string(&matched_path).unwrap();
+    assert!(matched_content.contains("read1"));
+    assert!(matched_content.contains("ACGTACGTACGTACGTACGTA"));
+    assert!(matched_content.contains("read2"));
+    assert!(matched_content.contains("CCCCCCCCCCCCCCCCCCCCC"));
+
+    let unmatched_content = fs::read_to_string(&unmatched_path).unwrap();
+    assert!(unmatched_content.contains("read3"));
+    assert!(unmatched_content.contains("TTTTTTTTTTTTTTTTTTTTT"));
+    assert!(unmatched_content.contains("read4"));
+    assert!(unmatched_content.contains("GGGGGGGGGGGGGGGGGGGGG"));
 }
 
 #[test]
@@ -282,8 +288,8 @@ fn test_paired_reads() {
     create_fastq(
         reads1_path.to_str().unwrap(),
         &[
-            ("read1/1", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"),
-            ("read2/1", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read1", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read3", "GGGGGGGGGGGGGGGGGGGGG", "IIIIIIIIIIIIIIIIIIIII"),
         ],
     )
     .unwrap();
@@ -291,8 +297,8 @@ fn test_paired_reads() {
     create_fastq(
         reads2_path.to_str().unwrap(),
         &[
-            ("read1/2", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"),
-            ("read2/2", "GGGGGGGGGGGGGGGGGGGGG", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read2", "GGGGGGGGGGGGGGGGGGGGG", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read4", "GGGGGGGGGGGGGGGGGGGGG", "IIIIIIIIIIIIIIIIIIIII"),
         ],
     )
     .unwrap();
@@ -318,6 +324,22 @@ fn test_paired_reads() {
 
     assert!(matched1_path.exists());
     assert!(matched2_path.exists());
+
+    let matched1_content = fs::read_to_string(&matched1_path).unwrap();
+    assert!(matched1_content.contains("read1"));
+    assert!(matched1_content.contains("ACGTACGTACGTACGTACGTA"));
+
+    let matched2_content = fs::read_to_string(&matched2_path).unwrap();
+    assert!(matched2_content.contains("read2"));
+    assert!(matched2_content.contains("GGGGGGGGGGGGGGGGGGGGG"));
+
+    let unmatched1_content = fs::read_to_string(&unmatched1_path).unwrap();
+    assert!(unmatched1_content.contains("read3"));
+    assert!(unmatched1_content.contains("GGGGGGGGGGGGGGGGGGGGG"));
+
+    let unmatched2_content = fs::read_to_string(&unmatched2_path).unwrap();
+    assert!(unmatched2_content.contains("read4"));
+    assert!(unmatched2_content.contains("GGGGGGGGGGGGGGGGGGGGG"));
 }
 
 #[test]
@@ -418,6 +440,62 @@ fn test_different_k_values() {
             .assert()
             .success();
     }
+}
+
+#[test]
+fn test_memory_allocation() {
+    let temp = TempDir::new().unwrap();
+    let ref_path = temp.path().join("ref.fa");
+    let reads_path = temp.path().join("reads.fq");
+
+    // Create reference with known sequences
+    create_fasta(
+        ref_path.to_str().unwrap(),
+        &[("ref1", "ACGTACGTACGTACGTACGTA")],
+    )
+    .unwrap();
+
+    // Create reads: some match, some don't
+    create_fastq(
+        reads_path.to_str().unwrap(),
+        &[
+            ("read1", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"), // match
+            ("read2", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"), // total non-match
+            ("read3", "ACGTACGTACGTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"), // partial non-match
+        ],
+    )
+    .unwrap();
+
+    assert!(ref_path.exists());
+    assert!(reads_path.exists());
+
+    // Run nuclease with no memory allocated
+    Command::cargo_bin("nuclease")
+        .unwrap()
+        .arg("--in")
+        .arg(reads_path.to_str().unwrap())
+        .arg("--ref")
+        .arg(ref_path.to_str().unwrap())
+        .arg("--k")
+        .arg("21")
+        .arg("--maxmem")
+        .arg("1B")
+        .assert()
+        .failure();
+
+    // Run nuclease with enough memory allocated
+    Command::cargo_bin("nuclease")
+        .unwrap()
+        .arg("--in")
+        .arg(reads_path.to_str().unwrap())
+        .arg("--ref")
+        .arg(ref_path.to_str().unwrap())
+        .arg("--k")
+        .arg("21")
+        .arg("--maxmem")
+        .arg("1G")
+        .assert()
+        .success();
 }
 
 #[test]

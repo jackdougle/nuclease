@@ -1,6 +1,7 @@
 mod core;
-pub mod kmer_ops;
+mod kmer_ops;
 
+use bytesize::ByteSize;
 use cap::Cap;
 use clap::Parser;
 use std::alloc;
@@ -12,27 +13,28 @@ Written by Jack Douglass
 Last modified October 5, 2025
 
 Nuclease compares DNA sequences from input file to DNA sequences from reference
- file using k-mer analysis. Splits up reference file sequences into k-mers of 
- specified length to build k-mer index, then compares each input read sequence 
- for matching k-mers. If a read sequence has >= minhits matching k-mers, it 
- will be printed as a match. Very memory-efficient and performant. Processes 
+ file using k-mer analysis. Splits up reference file sequences into k-mers of
+ specified length to build k-mer index, then compares each input read sequence
+ for matching k-mers. If a read sequence has >= minhits matching k-mers, it
+ will be printed as a match. Very memory-efficient and performant. Processes
  paired reads in two files or as a single interleaved file.
 
-USAGE: nuclease --in <reads file> --ref <ref file> --outm <file> --outu <file>
+USAGE: nuclease --in <reads file> --ref <ref file> ...
 
 INPUT PARAMETERS
     --in <file>         Input FASTA/FASTQ file containing reads to be filtered.
                         Use 'stdin.fq' or 'stdin' to pipe from stdin.
     --in2 <file>        (Optional) Second input file for 2nd pair of reads. 
                         Must be same length as main input file.
-    --ref <file>        (-r) Reference FASTA/FASTQ file containing sequences to 
+    --ref <file>        (-r) Reference FASTA/FASTQ file containing sequences to
                         build reference k-mer index. Program will serialize
                         reference k-mers and build to --binref path for future
                         use. Not necessary if '--binref <file>' is provided.
+    --saveref <file>    (-s) Path at which to store serialized k-mer index.
     --binref <file>     (-b) Binary file containing serialized k-mer index,
                         increases performance. Nuclease makes this
-                        automatically based on '--ref' file if path is also
-                        given here. Increases speed.
+                        automatically based on '--ref' file if '--saveref'
+                        <file> is provided.
 
 OUTPUT PARAMETERS: use 'stdout.fa / stdout.fq to pipe to stdout'
     --outm <file>       Output file for reads that have >= minhits k-mer 
@@ -91,6 +93,10 @@ struct Args {
     #[arg(short, long)]
     r#ref: String,
 
+    /// Path to store serialized reference index
+    #[arg(short, long)]
+    saveref: Option<String>,
+
     /// Binary file containing serialized ref k-mers
     #[arg(short, long)]
     binref: Option<String>,
@@ -131,10 +137,15 @@ struct Args {
 #[global_allocator]
 static ALLOCATOR: Cap<alloc::System> = Cap::new(alloc::System, usize::max_value());
 fn main() -> io::Result<()> {
-    ALLOCATOR.set_limit(30 * 1024 * 1024).unwrap();
-
     let start_time = Instant::now();
+
     let args = Args::parse();
+
+    if !args.maxmem.is_none() {
+        let memory_limit = args.maxmem.clone().unwrap();
+        let memory_bytes: ByteSize = memory_limit.parse().unwrap();
+        ALLOCATOR.set_limit(memory_bytes.as_u64() as usize).unwrap();
+    }
 
     validate_args(&args)?;
 
