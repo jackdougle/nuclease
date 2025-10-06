@@ -1,7 +1,9 @@
-mod duk;
-mod kmer_processor;
+mod core;
+pub mod kmer_ops;
 
+use cap::Cap;
 use clap::Parser;
+use std::alloc;
 use std::io;
 use std::time::Instant;
 
@@ -126,13 +128,17 @@ struct Args {
     order: bool,
 }
 
+#[global_allocator]
+static ALLOCATOR: Cap<alloc::System> = Cap::new(alloc::System, usize::max_value());
 fn main() -> io::Result<()> {
+    ALLOCATOR.set_limit(30 * 1024 * 1024).unwrap();
+
     let start_time = Instant::now();
     let args = Args::parse();
 
     validate_args(&args)?;
 
-    duk::run(args, start_time)?;
+    core::run(args, start_time)?;
 
     Ok(())
 }

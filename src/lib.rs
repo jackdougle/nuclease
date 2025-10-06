@@ -1,1 +1,1 @@
-pub mod kmer_processor;
+pub mod kmer_ops;

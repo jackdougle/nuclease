@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use nuclease::kmer_processor::{KmerProcessor, encode};
+    use nuclease::kmer_ops::{KmerProcessor, encode};
     use rand::Rng;
 
     // KMER ENCODING TESTS

@@ -1,4 +1,4 @@
-use crate::kmer_processor::KmerProcessor;
+use crate::kmer_ops::KmerProcessor;
 use bincode::{config, decode_from_std_read, encode_into_std_write};
 use needletail::parse_fastx_file;
 use rayon::prelude::*;
