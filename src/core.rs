@@ -27,6 +27,7 @@ pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
 
     let ref_path = args.r#ref;
     let bin_kmers_path = &args.binref.unwrap_or_default();
+    let new_bin_kmers_path = &args.saveref.unwrap_or_default();
 
     let mut kmer_processor = KmerProcessor::new(k, min_hits);
 
@@ -39,12 +40,12 @@ pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
             )
         }
         Err(e) => {
-            eprintln!("\nError using serialized ref file: {}", e);
+            eprintln!("\nInvalid serialized reference file: {}", e);
             println!("Loading ref k-mers from {}", ref_path);
 
             match get_reference_kmers(&ref_path, &mut kmer_processor) {
                 Ok(()) => println!(
-                    "Added {} from {}\n",
+                    "Added {} from {}",
                     kmer_processor.ref_kmers.iter().size_hint().0 - 1,
                     ref_path,
                 ),
@@ -54,8 +55,8 @@ pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
                 }
             };
 
-            match serialize_kmers(bin_kmers_path, &mut kmer_processor) {
-                Ok(()) => println!("Saved serialized k-mers to {}", bin_kmers_path),
+            match serialize_kmers(&new_bin_kmers_path, &mut kmer_processor) {
+                Ok(()) => println!("Saved serialized k-mers to {}", new_bin_kmers_path),
                 Err(e) => eprintln!("\nCould not serialize reference k-mers: {}", e),
             }
         }

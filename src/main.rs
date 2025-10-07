@@ -5,6 +5,7 @@ use bytesize::ByteSize;
 use cap::Cap;
 use clap::Parser;
 use std::alloc;
+use std::env;
 use std::io;
 use std::time::Instant;
 
@@ -30,7 +31,8 @@ INPUT PARAMETERS
                         build reference k-mer index. Program will serialize
                         reference k-mers and build to --binref path for future
                         use. Not necessary if '--binref <file>' is provided.
-    --saveref <file>    (-s) Path at which to store serialized k-mer index.
+    --saveref <file>    (-s) Path at which to store serialized k-mer index if
+                        no valid serialized k-mer index is provided.
     --binref <file>     (-b) Binary file containing serialized k-mer index,
                         increases performance. Nuclease makes this
                         automatically based on '--ref' file if '--saveref'
@@ -66,7 +68,7 @@ Function and usage documentation at ./README.md
 Contact jack.gdouglass@gmail.com for any questions or issues encountered.
 ";
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 #[command(
     version,
     before_help = "Fast DNA decontamination Rust program using k-mers",
@@ -140,6 +142,10 @@ fn main() -> io::Result<()> {
     let start_time = Instant::now();
 
     let args = Args::parse();
+
+    let version = env!("CARGO_PKG_VERSION");
+    let user_args: Vec<String> = std::env::args().skip(1).collect(); // Skip binary name
+    println!("Nuclease {} [{}]", version, user_args.join(" "));
 
     if !args.maxmem.is_none() {
         let memory_limit = args.maxmem.clone().unwrap();
