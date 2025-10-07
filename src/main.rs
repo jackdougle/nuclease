@@ -9,9 +9,9 @@ use std::env;
 use std::io;
 use std::time::Instant;
 
-const ABOUT: &str = "Nuclease 1.0.3
+const ABOUT: &str = "Nuclease 1.1.0
 Written by Jack Douglass
-Last modified October 5, 2025
+Last modified October 7, 2025
 
 Nuclease compares DNA sequences from input file to DNA sequences from reference
  file using k-mer analysis. Splits up reference file sequences into k-mers of
