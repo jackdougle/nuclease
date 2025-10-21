@@ -1,5 +1,5 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) 
-# **<img src="./public/ferris.png" width="40em" style="display: block; margin: auto;" alt="Ferris the crab" /> Nuclease 🧬**
+# **<img src="./public/ferris.png" width="40em" style="display: block; margin: auto;" alt="Ferris the crab" /> Nucleaze 🧬**
 A high-performance Rust tool for filtering DNA/RNA reads based on a set of reference k-mers.
 Inspired by [BBDuk](https://archive.jgi.doe.gov/data-and-tools/software-tools/bbtools/bb-tools-user-guide/bbduk-guide/) by Brian Bushnell. Provides performant and memory-efficient read processing with support for both paired and unpaired FASTA/FASTQ files, with multiple files or in interleaved format.  
 
@@ -49,12 +49,12 @@ If using Windows, download the correct installer from [Rustup](https://rustup.rs
 ### **2. Download the release executable**
 
 ```bash
-brew tap jackdougle/nuclease
-brew install nuclease
+brew tap jackdougle/nucleaze
+brew install nucleaze
 ```
 
 ### **3. Run program with necessary parameters**
-Nuclease requires at least `--in` and `--ref` to be provided.
+Nucleaze requires at least `--in` and `--ref` to be provided.
    - Providing both ref arguments is generally best for performance and redundance
 
 See more parameter documentation at **[./src/main.rs](/src/main.rs)**
@@ -63,7 +63,7 @@ See more parameter documentation at **[./src/main.rs](/src/main.rs)**
 
 ## **Example Usage**
 ```bash
-./nuclease --in reads.fq --ref refs.fa --outm matched.fq --outu unmatched.fq --k 21
+./nucleaze --in reads.fq --ref refs.fa --outm matched.fq --outu unmatched.fq --k 21
 ```
 
 This command:
@@ -119,7 +119,7 @@ Bases Processed:      150.00m bases             1000.00m bases/sec
    - Atomic counters track total reads and bases matched/unmatched and processing speed
 
 ### **Processing Modes**
-Nuclease automatically detects the appropriate read handling mode:
+Nucleaze automatically detects the appropriate read handling mode:
 
 | **Mode**                   | **Description**                                     |
 |----------------------------|-----------------------------------------------------|

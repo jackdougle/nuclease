@@ -370,7 +370,7 @@ fn test_serialized_reference() {
         .arg(reads_path.to_str().unwrap())
         .arg("--ref")
         .arg(ref_path.to_str().unwrap())
-        .arg("--binref")
+        .arg("--saveref")
         .arg(bin_path.to_str().unwrap())
         .arg("--outm")
         .arg(matched_path.to_str().unwrap())
