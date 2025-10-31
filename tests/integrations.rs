@@ -56,20 +56,21 @@ fn test_basic_filtering_unpaired() {
     assert!(reads_path.exists());
 
     // Run nucleaze
-    Command::cargo_bin("nucleaze")
-        .unwrap()
-        .arg("--in")
-        .arg(reads_path.to_str().unwrap())
-        .arg("--ref")
-        .arg(ref_path.to_str().unwrap())
-        .arg("--outm")
-        .arg(matched_path.to_str().unwrap())
-        .arg("--outu")
-        .arg(unmatched_path.to_str().unwrap())
-        .arg("--k")
-        .arg("21")
-        .assert()
-        .success();
+    Command::from_std(std::process::Command::new(assert_cmd::cargo::cargo_bin!(
+        "nucleaze"
+    )))
+    .arg("--in")
+    .arg(reads_path.to_str().unwrap())
+    .arg("--ref")
+    .arg(ref_path.to_str().unwrap())
+    .arg("--outm")
+    .arg(matched_path.to_str().unwrap())
+    .arg("--outu")
+    .arg(unmatched_path.to_str().unwrap())
+    .arg("--k")
+    .arg("21")
+    .assert()
+    .success();
 
     // Verify output files exist
     assert!(matched_path.exists());
@@ -110,19 +111,20 @@ fn test_interleaved() {
     )
     .unwrap();
 
-    Command::cargo_bin("nucleaze")
-        .unwrap()
-        .arg("--in")
-        .arg(reads_path.to_str().unwrap())
-        .arg("--ref")
-        .arg(ref_path.to_str().unwrap())
-        .arg("--outm")
-        .arg(matched_path.to_str().unwrap())
-        .arg("--outu")
-        .arg(unmatched_path.to_str().unwrap())
-        .arg("--interinput")
-        .assert()
-        .success();
+    Command::from_std(std::process::Command::new(assert_cmd::cargo::cargo_bin!(
+        "nucleaze"
+    )))
+    .arg("--in")
+    .arg(reads_path.to_str().unwrap())
+    .arg("--ref")
+    .arg(ref_path.to_str().unwrap())
+    .arg("--outm")
+    .arg(matched_path.to_str().unwrap())
+    .arg("--outu")
+    .arg(unmatched_path.to_str().unwrap())
+    .arg("--interinput")
+    .assert()
+    .success();
 
     assert!(matched_path.exists());
 
@@ -166,23 +168,24 @@ fn test_inter_in_paired_out() {
     )
     .unwrap();
 
-    Command::cargo_bin("nucleaze")
-        .unwrap()
-        .arg("--in")
-        .arg(reads_path.to_str().unwrap())
-        .arg("--ref")
-        .arg(ref_path.to_str().unwrap())
-        .arg("--outm")
-        .arg(matched1_path.to_str().unwrap())
-        .arg("--outm2")
-        .arg(matched2_path.to_str().unwrap())
-        .arg("--outu")
-        .arg(unmatched1_path.to_str().unwrap())
-        .arg("--outu2")
-        .arg(unmatched2_path.to_str().unwrap())
-        .arg("--interinput")
-        .assert()
-        .success();
+    Command::from_std(std::process::Command::new(assert_cmd::cargo::cargo_bin!(
+        "nucleaze"
+    )))
+    .arg("--in")
+    .arg(reads_path.to_str().unwrap())
+    .arg("--ref")
+    .arg(ref_path.to_str().unwrap())
+    .arg("--outm")
+    .arg(matched1_path.to_str().unwrap())
+    .arg("--outm2")
+    .arg(matched2_path.to_str().unwrap())
+    .arg("--outu")
+    .arg(unmatched1_path.to_str().unwrap())
+    .arg("--outu2")
+    .arg(unmatched2_path.to_str().unwrap())
+    .arg("--interinput")
+    .assert()
+    .success();
 
     assert!(matched1_path.exists());
     assert!(matched2_path.exists());
@@ -231,22 +234,23 @@ fn test_inter_in_paired_out_no_flag() {
     )
     .unwrap();
 
-    Command::cargo_bin("nucleaze")
-        .unwrap()
-        .arg("--in")
-        .arg(reads_path.to_str().unwrap())
-        .arg("--ref")
-        .arg(ref_path.to_str().unwrap())
-        .arg("--outm")
-        .arg(matched1_path.to_str().unwrap())
-        .arg("--outm2")
-        .arg(matched2_path.to_str().unwrap())
-        .arg("--outu")
-        .arg(unmatched1_path.to_str().unwrap())
-        .arg("--outu2")
-        .arg(unmatched2_path.to_str().unwrap())
-        .assert()
-        .failure();
+    Command::from_std(std::process::Command::new(assert_cmd::cargo::cargo_bin!(
+        "nucleaze"
+    )))
+    .arg("--in")
+    .arg(reads_path.to_str().unwrap())
+    .arg("--ref")
+    .arg(ref_path.to_str().unwrap())
+    .arg("--outm")
+    .arg(matched1_path.to_str().unwrap())
+    .arg("--outm2")
+    .arg(matched2_path.to_str().unwrap())
+    .arg("--outu")
+    .arg(unmatched1_path.to_str().unwrap())
+    .arg("--outu2")
+    .arg(unmatched2_path.to_str().unwrap())
+    .assert()
+    .failure();
 }
 
 #[test]
@@ -282,20 +286,21 @@ fn test_paired_in_inter_out() {
     )
     .unwrap();
 
-    Command::cargo_bin("nucleaze")
-        .unwrap()
-        .arg("--in")
-        .arg(reads1_path.to_str().unwrap())
-        .arg("--in2")
-        .arg(reads2_path.to_str().unwrap())
-        .arg("--ref")
-        .arg(ref_path.to_str().unwrap())
-        .arg("--outm")
-        .arg(matched_path.to_str().unwrap())
-        .arg("--outu")
-        .arg(unmatched_path.to_str().unwrap())
-        .assert()
-        .success();
+    Command::from_std(std::process::Command::new(assert_cmd::cargo::cargo_bin!(
+        "nucleaze"
+    )))
+    .arg("--in")
+    .arg(reads1_path.to_str().unwrap())
+    .arg("--in2")
+    .arg(reads2_path.to_str().unwrap())
+    .arg("--ref")
+    .arg(ref_path.to_str().unwrap())
+    .arg("--outm")
+    .arg(matched_path.to_str().unwrap())
+    .arg("--outu")
+    .arg(unmatched_path.to_str().unwrap())
+    .assert()
+    .success();
 
     assert!(matched_path.exists());
     assert!(matched_path.exists());
@@ -348,24 +353,25 @@ fn test_paired_reads() {
     )
     .unwrap();
 
-    Command::cargo_bin("nucleaze")
-        .unwrap()
-        .arg("--in")
-        .arg(reads1_path.to_str().unwrap())
-        .arg("--in2")
-        .arg(reads2_path.to_str().unwrap())
-        .arg("--ref")
-        .arg(ref_path.to_str().unwrap())
-        .arg("--outm")
-        .arg(matched1_path.to_str().unwrap())
-        .arg("--outm2")
-        .arg(matched2_path.to_str().unwrap())
-        .arg("--outu")
-        .arg(unmatched1_path.to_str().unwrap())
-        .arg("--outu2")
-        .arg(unmatched2_path.to_str().unwrap())
-        .assert()
-        .success();
+    Command::from_std(std::process::Command::new(assert_cmd::cargo::cargo_bin!(
+        "nucleaze"
+    )))
+    .arg("--in")
+    .arg(reads1_path.to_str().unwrap())
+    .arg("--in2")
+    .arg(reads2_path.to_str().unwrap())
+    .arg("--ref")
+    .arg(ref_path.to_str().unwrap())
+    .arg("--outm")
+    .arg(matched1_path.to_str().unwrap())
+    .arg("--outm2")
+    .arg(matched2_path.to_str().unwrap())
+    .arg("--outu")
+    .arg(unmatched1_path.to_str().unwrap())
+    .arg("--outu2")
+    .arg(unmatched2_path.to_str().unwrap())
+    .assert()
+    .success();
 
     assert!(matched1_path.exists());
     assert!(matched2_path.exists());
@@ -409,20 +415,21 @@ fn test_serialized_reference() {
     .unwrap();
 
     // First run: create serialized reference
-    Command::cargo_bin("nucleaze")
-        .unwrap()
-        .arg("--in")
-        .arg(reads_path.to_str().unwrap())
-        .arg("--ref")
-        .arg(ref_path.to_str().unwrap())
-        .arg("--saveref")
-        .arg(bin_path.to_str().unwrap())
-        .arg("--outm")
-        .arg(matched_path.to_str().unwrap())
-        .arg("--outu")
-        .arg(unmatched_path.to_str().unwrap())
-        .assert()
-        .success();
+    Command::from_std(std::process::Command::new(assert_cmd::cargo::cargo_bin!(
+        "nucleaze"
+    )))
+    .arg("--in")
+    .arg(reads_path.to_str().unwrap())
+    .arg("--ref")
+    .arg(ref_path.to_str().unwrap())
+    .arg("--saveref")
+    .arg(bin_path.to_str().unwrap())
+    .arg("--outm")
+    .arg(matched_path.to_str().unwrap())
+    .arg("--outu")
+    .arg(unmatched_path.to_str().unwrap())
+    .assert()
+    .success();
 
     // Verify binary file was created
     assert!(bin_path.exists());
@@ -431,21 +438,22 @@ fn test_serialized_reference() {
     fs::remove_file(&matched_path).unwrap();
     fs::remove_file(&unmatched_path).unwrap();
 
-    Command::cargo_bin("nucleaze")
-        .unwrap()
-        .arg("--in")
-        .arg(reads_path.to_str().unwrap())
-        .arg("--ref")
-        .arg(ref_path.to_str().unwrap())
-        .arg("--binref")
-        .arg(bin_path.to_str().unwrap())
-        .arg("--outm")
-        .arg(matched_path.to_str().unwrap())
-        .arg("--outu")
-        .arg(unmatched_path.to_str().unwrap())
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Loaded"));
+    Command::from_std(std::process::Command::new(assert_cmd::cargo::cargo_bin!(
+        "nucleaze"
+    )))
+    .arg("--in")
+    .arg(reads_path.to_str().unwrap())
+    .arg("--ref")
+    .arg(ref_path.to_str().unwrap())
+    .arg("--binref")
+    .arg(bin_path.to_str().unwrap())
+    .arg("--outm")
+    .arg(matched_path.to_str().unwrap())
+    .arg("--outu")
+    .arg(unmatched_path.to_str().unwrap())
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("Loaded"));
 }
 
 #[test]
@@ -470,20 +478,21 @@ fn test_different_k_values() {
         let matched = temp.path().join(format!("matched_k{}.fq", k));
         let unmatched = temp.path().join(format!("unmatched_k{}.fq", k));
 
-        Command::cargo_bin("nucleaze")
-            .unwrap()
-            .arg("--in")
-            .arg(reads_path.to_str().unwrap())
-            .arg("--ref")
-            .arg(ref_path.to_str().unwrap())
-            .arg("--outm")
-            .arg(matched.to_str().unwrap())
-            .arg("--outu")
-            .arg(unmatched.to_str().unwrap())
-            .arg("--k")
-            .arg(k.to_string())
-            .assert()
-            .success();
+        Command::from_std(std::process::Command::new(assert_cmd::cargo::cargo_bin!(
+            "nucleaze"
+        )))
+        .arg("--in")
+        .arg(reads_path.to_str().unwrap())
+        .arg("--ref")
+        .arg(ref_path.to_str().unwrap())
+        .arg("--outm")
+        .arg(matched.to_str().unwrap())
+        .arg("--outu")
+        .arg(unmatched.to_str().unwrap())
+        .arg("--k")
+        .arg(k.to_string())
+        .assert()
+        .success();
     }
 }
 
@@ -569,20 +578,21 @@ fn test_duplicate_read_files() {
     )
     .unwrap();
 
-    Command::cargo_bin("nucleaze")
-        .unwrap()
-        .arg("--in")
-        .arg(reads_path.to_str().unwrap())
-        .arg("--in2")
-        .arg(reads_path_dup.to_str().unwrap())
-        .arg("--ref")
-        .arg(ref_path.to_str().unwrap())
-        .arg("--outm")
-        .arg(matched_path.to_str().unwrap())
-        .arg("--outu")
-        .arg(unmatched_path.to_str().unwrap())
-        .assert()
-        .failure();
+    Command::from_std(std::process::Command::new(assert_cmd::cargo::cargo_bin!(
+        "nucleaze"
+    )))
+    .arg("--in")
+    .arg(reads_path.to_str().unwrap())
+    .arg("--in2")
+    .arg(reads_path_dup.to_str().unwrap())
+    .arg("--ref")
+    .arg(ref_path.to_str().unwrap())
+    .arg("--outm")
+    .arg(matched_path.to_str().unwrap())
+    .arg("--outu")
+    .arg(unmatched_path.to_str().unwrap())
+    .assert()
+    .failure();
 }
 
 #[test]
@@ -606,22 +616,23 @@ fn test_minhits_threshold() {
     .unwrap();
 
     // With minhits=1, should match
-    Command::cargo_bin("nucleaze")
-        .unwrap()
-        .arg("--in")
-        .arg(reads_path.to_str().unwrap())
-        .arg("--ref")
-        .arg(ref_path.to_str().unwrap())
-        .arg("--outm")
-        .arg(matched_path.to_str().unwrap())
-        .arg("--outu")
-        .arg(unmatched_path.to_str().unwrap())
-        .arg("--k")
-        .arg("4")
-        .arg("--minhits")
-        .arg("2")
-        .assert()
-        .success();
+    Command::from_std(std::process::Command::new(assert_cmd::cargo::cargo_bin!(
+        "nucleaze"
+    )))
+    .arg("--in")
+    .arg(reads_path.to_str().unwrap())
+    .arg("--ref")
+    .arg(ref_path.to_str().unwrap())
+    .arg("--outm")
+    .arg(matched_path.to_str().unwrap())
+    .arg("--outu")
+    .arg(unmatched_path.to_str().unwrap())
+    .arg("--k")
+    .arg("4")
+    .arg("--minhits")
+    .arg("2")
+    .assert()
+    .success();
 
     let matched = fs::read_to_string(&matched_path).unwrap();
     assert!(matched.contains("read1"));
@@ -649,18 +660,19 @@ fn test_fasta_output_format() {
     )
     .unwrap();
 
-    Command::cargo_bin("nucleaze")
-        .unwrap()
-        .arg("--in")
-        .arg(reads_path.to_str().unwrap())
-        .arg("--ref")
-        .arg(ref_path.to_str().unwrap())
-        .arg("--outm")
-        .arg(matched_fasta_path.to_str().unwrap())
-        .arg("--outu")
-        .arg(unmatched_fasta_path.to_str().unwrap())
-        .assert()
-        .success();
+    Command::from_std(std::process::Command::new(assert_cmd::cargo::cargo_bin!(
+        "nucleaze"
+    )))
+    .arg("--in")
+    .arg(reads_path.to_str().unwrap())
+    .arg("--ref")
+    .arg(ref_path.to_str().unwrap())
+    .arg("--outm")
+    .arg(matched_fasta_path.to_str().unwrap())
+    .arg("--outu")
+    .arg(unmatched_fasta_path.to_str().unwrap())
+    .assert()
+    .success();
 
     let matched = fs::read_to_string(&matched_fasta_path).unwrap();
     assert!(matched.starts_with(">"));
@@ -668,18 +680,19 @@ fn test_fasta_output_format() {
     assert!(!matched.contains("+"));
     assert!(!matched.contains("IIIIIIIIIIIIIIIIIIIII"));
 
-    Command::cargo_bin("nucleaze")
-        .unwrap()
-        .arg("--in")
-        .arg(reads_path.to_str().unwrap())
-        .arg("--ref")
-        .arg(ref_path.to_str().unwrap())
-        .arg("--outm")
-        .arg(matched_fastq_path.to_str().unwrap())
-        .arg("--outu")
-        .arg(unmatched_fastq_path.to_str().unwrap())
-        .assert()
-        .success();
+    Command::from_std(std::process::Command::new(assert_cmd::cargo::cargo_bin!(
+        "nucleaze"
+    )))
+    .arg("--in")
+    .arg(reads_path.to_str().unwrap())
+    .arg("--ref")
+    .arg(ref_path.to_str().unwrap())
+    .arg("--outm")
+    .arg(matched_fastq_path.to_str().unwrap())
+    .arg("--outu")
+    .arg(unmatched_fastq_path.to_str().unwrap())
+    .assert()
+    .success();
 
     let matched = fs::read_to_string(&matched_fastq_path).unwrap();
     assert!(matched.starts_with("@"));
@@ -689,7 +702,11 @@ fn test_fasta_output_format() {
 
 #[test]
 fn test_missing_required_args() {
-    Command::cargo_bin("nucleaze").unwrap().assert().failure();
+    Command::from_std(std::process::Command::new(assert_cmd::cargo::cargo_bin!(
+        "nucleaze"
+    )))
+    .assert()
+    .failure();
 }
 
 #[test]
@@ -712,18 +729,19 @@ fn test_threads_argument() {
     )
     .unwrap();
 
-    Command::cargo_bin("nucleaze")
-        .unwrap()
-        .arg("--in")
-        .arg(reads_path.to_str().unwrap())
-        .arg("--ref")
-        .arg(ref_path.to_str().unwrap())
-        .arg("--outm")
-        .arg(matched_path.to_str().unwrap())
-        .arg("--outu")
-        .arg(unmatched_path.to_str().unwrap())
-        .arg("--threads")
-        .arg("2")
-        .assert()
-        .success();
+    Command::from_std(std::process::Command::new(assert_cmd::cargo::cargo_bin!(
+        "nucleaze"
+    )))
+    .arg("--in")
+    .arg(reads_path.to_str().unwrap())
+    .arg("--ref")
+    .arg(ref_path.to_str().unwrap())
+    .arg("--outm")
+    .arg(matched_path.to_str().unwrap())
+    .arg("--outu")
+    .arg(unmatched_path.to_str().unwrap())
+    .arg("--threads")
+    .arg("2")
+    .assert()
+    .success();
 }
