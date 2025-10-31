@@ -1,6 +1,6 @@
+use std::cmp::min;
 use std::u64;
 
-use needletail::bitkmer::canonical;
 use rustc_hash::FxHashSet;
 
 pub struct KmerProcessor {
@@ -30,15 +30,21 @@ impl KmerProcessor {
             self.ref_kmers.insert(metadata);
         }
 
-        let mut kmer: u64 = 0b00;
+        let mut forward_kmer: u64 = 0b00;
+        let mut reverse_kmer: u64 = 0b00;
 
         for i in 0..=ref_seq.len() - self.k {
             if i == 0 {
-                kmer = encode(&ref_seq[0..self.k]);
+                forward_kmer = encode_forward(&ref_seq[0..self.k]);
+                reverse_kmer = encode_reverse(&ref_seq[0..self.k]);
             } else {
-                kmer = ((kmer << 2) | encode(&[ref_seq[i + self.k - 1]])) & self.bit_cap;
+                forward_kmer = ((forward_kmer << 2) | encode_forward(&[ref_seq[i + self.k - 1]]))
+                    & self.bit_cap;
+                reverse_kmer = ((reverse_kmer >> 2)
+                    | (encode_reverse(&[ref_seq[i + self.k - 1]]) << (2 * (self.k - 1))))
+                    & self.bit_cap;
             }
-            self.ref_kmers.insert(canonical((kmer, self.k as u8)).0.0);
+            self.ref_kmers.insert(min(forward_kmer, reverse_kmer));
         }
     }
 
@@ -53,19 +59,24 @@ impl KmerProcessor {
         }
 
         let mut hits: u8 = 0;
-        let mut kmer = 0b00;
+        let mut forward_kmer = 0b00;
+        let mut reverse_kmer = 0b00;
 
         for i in 0..=read_seq.len() - self.k {
             if i == 0 {
-                kmer = encode(&read_seq[0..self.k]);
+                forward_kmer = encode_forward(&read_seq[0..self.k]);
+                reverse_kmer = encode_reverse(&read_seq[0..self.k]);
             } else {
-                kmer = ((kmer << 2) | encode(&[read_seq[i + self.k - 1]])) & self.bit_cap;
+                forward_kmer = ((forward_kmer << 2) | encode_forward(&[read_seq[i + self.k - 1]]))
+                    & self.bit_cap;
+                reverse_kmer = ((reverse_kmer >> 2)
+                    | (encode_reverse(&[read_seq[i + self.k - 1]]) << (2 * (self.k - 1))))
+                    & self.bit_cap;
             }
 
-            if self
-                .ref_kmers
-                .contains(&canonical((kmer, self.k as u8)).0.0)
-            {
+            let canonical = min(forward_kmer, reverse_kmer);
+
+            if self.ref_kmers.contains(&canonical) {
                 hits += 1;
                 if hits >= self.threshold {
                     return true;
@@ -78,8 +89,8 @@ impl KmerProcessor {
 }
 
 #[inline(always)]
-pub fn encode(seq: &[u8]) -> u64 {
-    static BASE_TABLE: [u8; 85] = {
+pub fn encode_forward(seq: &[u8]) -> u64 {
+    static FORWARD_BASE_TABLE: [u8; 85] = {
         let mut bases = [0u8; 85];
         bases[b'A' as usize] = 0b00;
         bases[b'C' as usize] = 0b01;
@@ -89,7 +100,25 @@ pub fn encode(seq: &[u8]) -> u64 {
     };
 
     seq.iter().fold(0u64, |encoded, &base| {
-        let val = BASE_TABLE[base as usize];
+        let val = FORWARD_BASE_TABLE[base as usize];
+        debug_assert!(val <= 0b11, "Invalid base: {}", base as char);
+        (encoded << 2) | val as u64
+    })
+}
+
+#[inline(always)]
+pub fn encode_reverse(seq: &[u8]) -> u64 {
+    static REVERSE_BASE_TABLE: [u8; 85] = {
+        let mut bases = [0u8; 85];
+        bases[b'A' as usize] = 0b11;
+        bases[b'C' as usize] = 0b10;
+        bases[b'G' as usize] = 0b01;
+        bases[b'T' as usize] = 0b00;
+        bases
+    };
+
+    seq.iter().rev().fold(0u64, |encoded, &base| {
+        let val = REVERSE_BASE_TABLE[base as usize];
         debug_assert!(val <= 0b11, "Invalid base: {}", base as char);
         (encoded << 2) | val as u64
     })
@@ -97,41 +126,178 @@ pub fn encode(seq: &[u8]) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use crate::kmer_ops::{KmerProcessor, encode};
+    use crate::kmer_ops::{KmerProcessor, encode_forward, encode_reverse};
     use rand::Rng;
+    use std::cmp::min;
 
     // KMER ENCODING TESTS
 
     #[test]
     fn test_encode_single_base() {
-        assert_eq!(encode(b"A"), 0b00);
-        assert_eq!(encode(b"C"), 0b01);
-        assert_eq!(encode(b"G"), 0b10);
-        assert_eq!(encode(b"T"), 0b11);
+        // Test forward encoding
+        assert_eq!(encode_forward(b"A"), 0b00);
+        assert_eq!(encode_forward(b"C"), 0b01);
+        assert_eq!(encode_forward(b"G"), 0b10);
+        assert_eq!(encode_forward(b"T"), 0b11);
+
+        // Test reverse encoding
+        assert_eq!(encode_reverse(b"A"), 0b11);
+        assert_eq!(encode_reverse(b"C"), 0b10);
+        assert_eq!(encode_reverse(b"G"), 0b01);
+        assert_eq!(encode_reverse(b"T"), 0b00);
     }
 
     #[test]
     fn test_encode_multiple_bases() {
+        // Test forward encoding
         // AA = 0b0000
-        assert_eq!(encode(b"AA"), 0b0000);
+        assert_eq!(encode_forward(b"AA"), 0b0000);
         // AC = 0b0001
-        assert_eq!(encode(b"AC"), 0b0001);
+        assert_eq!(encode_forward(b"AC"), 0b0001);
         // AT = 0b0011
-        assert_eq!(encode(b"AT"), 0b0011);
+        assert_eq!(encode_forward(b"AT"), 0b0011);
         // ACGT = 0b00011011
-        assert_eq!(encode(b"ACGT"), 0b00011011);
+        assert_eq!(encode_forward(b"ACGT"), 0b00011011);
+
+        // Test reverse encoding
+        // AA reverse = 0b1111
+        assert_eq!(encode_reverse(b"AA"), 0b1111);
+        // AC reverse = 0b1011
+        assert_eq!(encode_reverse(b"AC"), 0b1011);
+        // AT reverse = 0b0011
+        assert_eq!(encode_reverse(b"AT"), 0b0011);
+        // ACGT reverse = 0b00011011
+        assert_eq!(encode_reverse(b"ACGT"), 0b00011011);
+
+        // Test canonical behavior
+        // TTA forward = 0b111100, reverse = 0b001111
+        let tta_forward = encode_forward(b"TTA");
+        let tta_reverse = encode_reverse(b"TTA");
+        assert_ne!(tta_forward, tta_reverse);
+        assert_eq!(min(tta_forward, tta_reverse), 0b110000);
+
+        // Test that forward and reverse are different for asymmetric sequences
+        assert_ne!(encode_forward(b"ACGG"), encode_reverse(b"ACGG"));
+        assert_ne!(encode_forward(b"TTA"), encode_reverse(b"TTA"));
     }
 
     #[test]
     fn test_encode_longer_sequence() {
         // Test a longer sequence
-        let seq = b"ACGTACGT";
-        let encoded = encode(seq);
-        assert!(encoded > 0);
+        let seq = b"ACGTACGG";
 
-        // Verify it's a valid encoding
+        // Test forward encoding
+        let forward_encoded = encode_forward(seq);
+        assert!(forward_encoded > 0);
+
+        // Test reverse encoding
+        let reverse_encoded = encode_reverse(seq);
+        assert!(reverse_encoded > 0);
+
+        // Verify both are valid encodings
         let expected_bits = seq.len() * 2;
-        assert!(encoded < (1u64 << expected_bits));
+        assert!(forward_encoded < (1u64 << expected_bits));
+        assert!(reverse_encoded < (1u64 << expected_bits));
+
+        // Test that forward and reverse are different for this sequence
+        assert_ne!(forward_encoded, reverse_encoded);
+
+        // Test canonical behavior
+        let canonical = min(forward_encoded, reverse_encoded);
+        assert!(canonical > 0);
+        assert!(canonical <= forward_encoded);
+        assert!(canonical <= reverse_encoded);
+    }
+
+    #[test]
+    fn test_canonical_encoding_behavior() {
+        // Test sequences where forward and reverse are different
+        let asymmetric_seqs = vec![
+            b"ACGG".as_slice(),
+            b"TTA".as_slice(),
+            b"GGCCC".as_slice(),
+            b"ATCGA".as_slice(),
+        ];
+
+        for seq in &asymmetric_seqs {
+            let forward = encode_forward(seq);
+            let reverse = encode_reverse(seq);
+            let canonical = min(forward, reverse);
+
+            // Canonical should be the minimum of forward and reverse
+            assert_eq!(canonical, min(forward, reverse));
+            assert!(canonical <= forward);
+            assert!(canonical <= reverse);
+
+            // For asymmetric sequences, forward and reverse should be different
+            assert_ne!(forward, reverse);
+        }
+    }
+
+    #[test]
+    fn test_palindromic_sequences() {
+        // Test palindromic sequences where forward and reverse should be equal
+        let palindromic_seqs = vec![
+            b"AT".as_slice(),
+            b"GC".as_slice(),
+            b"ATAT".as_slice(),
+            b"GCGC".as_slice(),
+        ];
+
+        for seq in &palindromic_seqs {
+            let forward = encode_forward(seq);
+            let reverse = encode_reverse(seq);
+            let canonical = min(forward, reverse);
+
+            // For palindromic sequences, forward and reverse should be equal
+            assert_eq!(forward, reverse);
+            assert_eq!(canonical, forward);
+            assert_eq!(canonical, reverse);
+        }
+    }
+
+    #[test]
+    fn test_encoding_consistency() {
+        // Test that encoding is consistent with expected bit patterns
+        let test_cases = vec![
+            (b"A".as_slice(), 0b00, 0b11),
+            (b"C".as_slice(), 0b01, 0b10),
+            (b"G".as_slice(), 0b10, 0b01),
+            (b"T".as_slice(), 0b11, 0b00),
+            (b"AA".as_slice(), 0b0000, 0b1111),
+            (b"AC".as_slice(), 0b0001, 0b1011),
+            (b"AT".as_slice(), 0b0011, 0b0011),
+            (b"GC".as_slice(), 0b1001, 0b1001),
+        ];
+
+        for (seq, expected_forward, expected_reverse) in &test_cases {
+            assert_eq!(encode_forward(seq), *expected_forward);
+            assert_eq!(encode_reverse(seq), *expected_reverse);
+        }
+    }
+
+    #[test]
+    fn test_encoding_bit_length() {
+        // Test that encoding produces correct bit lengths
+        let test_seqs = vec![
+            b"C".as_slice(),
+            b"AC".as_slice(),
+            b"ACG".as_slice(),
+            b"ACGT".as_slice(),
+            b"ACGTACGT".as_slice(),
+        ];
+
+        for seq in &test_seqs {
+            let forward = encode_forward(seq);
+            let reverse = encode_reverse(seq);
+            let expected_bits = seq.len() * 2;
+            let max_value = (1u64 << expected_bits) - 1;
+
+            assert!(forward <= max_value);
+            assert!(reverse <= max_value);
+            assert!(forward > 0 || seq.len() == 0);
+            assert!(reverse > 0 || seq.len() == 0);
+        }
     }
 
     // KMER PROCESSOR INITIALIZATION TESTS
@@ -375,6 +541,7 @@ mod tests {
     }
 
     // PERFORMANCE & CAPACITY TESTS
+
     #[test]
     fn test_large_reference_set() {
         let mut processor = KmerProcessor::new(21, 1);

@@ -1,26 +1,22 @@
 mod core;
 mod kmer_ops;
 
-use bytesize::ByteSize;
-use cap::Cap;
 use clap::Parser;
-use std::alloc;
-use std::env;
 use std::io;
 use std::time::Instant;
 
-const ABOUT: &str = "Nucleaze 1.1.0
+const ABOUT: &str = "Nucleaze 1.2.0
 Written by Jack Douglass
-Last modified October 21, 2025
+Last modified October 25, 2025
 
-Nuclease compares DNA sequences from input file to DNA sequences from reference
+Nucleaze compares DNA sequences from input file to DNA sequences from reference
  file using k-mer analysis. Splits up reference file sequences into k-mers of
  specified length to build k-mer index, then compares each input read sequence
  for matching k-mers. If a read sequence has >= minhits matching k-mers, it
  will be printed as a match. Very memory-efficient and performant. Processes
  paired reads in two files or as a single interleaved file.
 
-USAGE: nuclease --in <reads file> --ref <ref file> ...
+USAGE: nucleaze --in <reads file> --ref <ref file> ...
 
 INPUT PARAMETERS
     --in <file>         Input FASTA/FASTQ file containing reads to be filtered.
@@ -34,7 +30,7 @@ INPUT PARAMETERS
     --saveref <file>    (-s) Path at which to store serialized k-mer index if
                         no valid serialized k-mer index is provided.
     --binref <file>     (-b) Binary file containing serialized k-mer index,
-                        increases performance. Nuclease makes this
+                        increases performance. Nucleaze makes this
                         automatically based on '--ref' file if '--saveref'
                         <file> is provided.
 
@@ -68,40 +64,28 @@ Function and usage documentation at ./README.md
 Contact jack.gdouglass@gmail.com for any questions or issues encountered.
 ";
 
-#[derive(Parser, Debug)]
-#[command(
-    version,
-    before_help = "Fast DNA decontamination Rust program using k-mers",
-    override_help = ABOUT,
-)]
+#[derive(Parser)]
+#[command(version, override_help = ABOUT)]
 struct Args {
     /// Amount of bases in a k-mer
-    #[arg(short, long)]
+    #[arg(long)]
     k: Option<usize>,
-
-    /// Max amount of threads to use
-    #[arg(short, long)]
-    threads: Option<usize>,
 
     /// Min number of k-mer hits to match a read
     #[arg(long)]
     minhits: Option<u8>,
 
+    /// Max amount of threads to use
+    #[arg(long)]
+    threads: Option<usize>,
+
     /// Memory cap in human-readable format
-    #[arg(short, long)]
+    #[arg(long)]
     maxmem: Option<String>,
 
     /// FASTA/FASTQ path for reference sequences
-    #[arg(short, long)]
+    #[arg(long)]
     r#ref: String,
-
-    /// Path to store serialized reference index
-    #[arg(short, long)]
-    saveref: Option<String>,
-
-    /// Binary file containing serialized ref k-mers
-    #[arg(short, long)]
-    binref: Option<String>,
 
     /// FASTA/FASTQ path for read sequences
     #[arg(long)]
@@ -110,6 +94,14 @@ struct Args {
     /// FASTA/FASTQ path for 2nd pair of reads
     #[arg(long)]
     in2: Option<String>,
+
+    /// Path to store serialized reference index
+    #[arg(short, long)]
+    saveref: Option<String>,
+
+    /// Binary file containing serialized ref k-mers
+    #[arg(long)]
+    binref: Option<String>,
 
     /// Output file of matched reads
     #[arg(long)]
@@ -128,7 +120,7 @@ struct Args {
     outu2: Option<String>,
 
     /// Enabling flag signals interleaved input
-    #[arg(short, long)]
+    #[arg(long)]
     interinput: bool,
 
     /// Enabling flag causes ordered output
@@ -136,22 +128,14 @@ struct Args {
     order: bool,
 }
 
-#[global_allocator]
-static ALLOCATOR: Cap<alloc::System> = Cap::new(alloc::System, usize::max_value());
 fn main() -> io::Result<()> {
     let start_time = Instant::now();
 
     let args = Args::parse();
 
     let version = env!("CARGO_PKG_VERSION");
-    let user_args: Vec<String> = std::env::args().skip(1).collect(); // Skip binary name
-    println!("Nuclease {} [{}]", version, user_args.join(" "));
-
-    if !args.maxmem.is_none() {
-        let memory_limit = args.maxmem.clone().unwrap();
-        let memory_bytes: ByteSize = memory_limit.parse().unwrap();
-        ALLOCATOR.set_limit(memory_bytes.as_u64() as usize).unwrap();
-    }
+    let user_args: Vec<String> = std::env::args().skip(1).collect();
+    println!("Nucleaze {} [{}]", version, user_args.join(" "));
 
     validate_args(&args)?;
 

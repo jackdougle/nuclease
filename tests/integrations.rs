@@ -55,8 +55,8 @@ fn test_basic_filtering_unpaired() {
     assert!(ref_path.exists());
     assert!(reads_path.exists());
 
-    // Run nuclease
-    Command::cargo_bin("nuclease")
+    // Run nucleaze
+    Command::cargo_bin("nucleaze")
         .unwrap()
         .arg("--in")
         .arg(reads_path.to_str().unwrap())
@@ -110,7 +110,7 @@ fn test_interleaved() {
     )
     .unwrap();
 
-    Command::cargo_bin("nuclease")
+    Command::cargo_bin("nucleaze")
         .unwrap()
         .arg("--in")
         .arg(reads_path.to_str().unwrap())
@@ -166,7 +166,7 @@ fn test_inter_in_paired_out() {
     )
     .unwrap();
 
-    Command::cargo_bin("nuclease")
+    Command::cargo_bin("nucleaze")
         .unwrap()
         .arg("--in")
         .arg(reads_path.to_str().unwrap())
@@ -205,6 +205,51 @@ fn test_inter_in_paired_out() {
 }
 
 #[test]
+fn test_inter_in_paired_out_no_flag() {
+    let temp = TempDir::new().unwrap();
+    let ref_path = temp.path().join("ref.fa");
+    let reads_path = temp.path().join("reads1.fq");
+    let matched1_path = temp.path().join("matched1.fq");
+    let matched2_path = temp.path().join("matched2.fq");
+    let unmatched1_path = temp.path().join("unmatched1.fq");
+    let unmatched2_path = temp.path().join("unmatched2.fq");
+
+    create_fasta(
+        ref_path.to_str().unwrap(),
+        &[("ref1", "ACGTACGTACGTACGTACGTA")],
+    )
+    .unwrap();
+
+    create_fastq(
+        reads_path.to_str().unwrap(),
+        &[
+            ("read1", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read2", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read3", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"),
+            ("read4", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"),
+        ],
+    )
+    .unwrap();
+
+    Command::cargo_bin("nucleaze")
+        .unwrap()
+        .arg("--in")
+        .arg(reads_path.to_str().unwrap())
+        .arg("--ref")
+        .arg(ref_path.to_str().unwrap())
+        .arg("--outm")
+        .arg(matched1_path.to_str().unwrap())
+        .arg("--outm2")
+        .arg(matched2_path.to_str().unwrap())
+        .arg("--outu")
+        .arg(unmatched1_path.to_str().unwrap())
+        .arg("--outu2")
+        .arg(unmatched2_path.to_str().unwrap())
+        .assert()
+        .failure();
+}
+
+#[test]
 fn test_paired_in_inter_out() {
     let temp = TempDir::new().unwrap();
     let ref_path = temp.path().join("ref.fa");
@@ -237,7 +282,7 @@ fn test_paired_in_inter_out() {
     )
     .unwrap();
 
-    Command::cargo_bin("nuclease")
+    Command::cargo_bin("nucleaze")
         .unwrap()
         .arg("--in")
         .arg(reads1_path.to_str().unwrap())
@@ -303,7 +348,7 @@ fn test_paired_reads() {
     )
     .unwrap();
 
-    Command::cargo_bin("nuclease")
+    Command::cargo_bin("nucleaze")
         .unwrap()
         .arg("--in")
         .arg(reads1_path.to_str().unwrap())
@@ -364,7 +409,7 @@ fn test_serialized_reference() {
     .unwrap();
 
     // First run: create serialized reference
-    Command::cargo_bin("nuclease")
+    Command::cargo_bin("nucleaze")
         .unwrap()
         .arg("--in")
         .arg(reads_path.to_str().unwrap())
@@ -386,7 +431,7 @@ fn test_serialized_reference() {
     fs::remove_file(&matched_path).unwrap();
     fs::remove_file(&unmatched_path).unwrap();
 
-    Command::cargo_bin("nuclease")
+    Command::cargo_bin("nucleaze")
         .unwrap()
         .arg("--in")
         .arg(reads_path.to_str().unwrap())
@@ -425,7 +470,7 @@ fn test_different_k_values() {
         let matched = temp.path().join(format!("matched_k{}.fq", k));
         let unmatched = temp.path().join(format!("unmatched_k{}.fq", k));
 
-        Command::cargo_bin("nuclease")
+        Command::cargo_bin("nucleaze")
             .unwrap()
             .arg("--in")
             .arg(reads_path.to_str().unwrap())
@@ -442,62 +487,61 @@ fn test_different_k_values() {
     }
 }
 
-#[test]
-fn test_memory_allocation() {
-    let temp = TempDir::new().unwrap();
-    let ref_path = temp.path().join("ref.fa");
-    let reads_path = temp.path().join("reads.fq");
+// #[test]
+// fn test_memory_allocation() {
+//     let temp = TempDir::new().unwrap();
+//     let ref_path = temp.path().join("ref.fa");
+//     let reads_path = temp.path().join("reads.fq");
 
-    // Create reference with known sequences
-    create_fasta(
-        ref_path.to_str().unwrap(),
-        &[("ref1", "ACGTACGTACGTACGTACGTA")],
-    )
-    .unwrap();
+//     // Create reference with known sequences
+//     create_fasta(
+//         ref_path.to_str().unwrap(),
+//         &[("ref1", "ACGTACGTACGTACGTACGTA")],
+//     )
+//     .unwrap();
 
-    // Create reads: some match, some don't
-    create_fastq(
-        reads_path.to_str().unwrap(),
-        &[
-            ("read1", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"), // match
-            ("read2", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"), // total non-match
-            ("read3", "ACGTACGTACGTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"), // partial non-match
-        ],
-    )
-    .unwrap();
+//     // Create reads: some match, some don't
+//     create_fastq(
+//         reads_path.to_str().unwrap(),
+//         &[
+//             ("read1", "ACGTACGTACGTACGTACGTA", "IIIIIIIIIIIIIIIIIIIII"), // match
+//             ("read2", "TTTTTTTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"), // total non-match
+//             ("read3", "ACGTACGTACGTTTTTTTTTT", "IIIIIIIIIIIIIIIIIIIII"), // partial non-match
+//         ],
+//     )
+//     .unwrap();
 
-    assert!(ref_path.exists());
-    assert!(reads_path.exists());
+//     assert!(ref_path.exists());
+//     assert!(reads_path.exists());
 
-    // Run nuclease with no memory allocated
-    Command::cargo_bin("nuclease")
-        .unwrap()
-        .arg("--in")
-        .arg(reads_path.to_str().unwrap())
-        .arg("--ref")
-        .arg(ref_path.to_str().unwrap())
-        .arg("--k")
-        .arg("21")
-        .arg("--maxmem")
-        .arg("1B")
-        .assert()
-        .failure();
+//     // Run nucleaze with no memory allocated
+//     Command::cargo_bin("nucleaze")
+//         .unwrap()
+//         .arg("--in")
+//         .arg(reads_path.to_str().unwrap())
+//         .arg("--ref")
+//         .arg(ref_path.to_str().unwrap())
+//         .arg("--k")
+//         .arg("21")
+//         .arg("--maxmem")
+//         .arg("1B")
+//         .assert()
+//         .failure();
 
-    // Run nuclease with enough memory allocated
-    Command::cargo_bin("nuclease")
-        .unwrap()
-        .arg("--in")
-        .arg(reads_path.to_str().unwrap())
-        .arg("--ref")
-        .arg(ref_path.to_str().unwrap())
-        .arg("--k")
-        .arg("21")
-        .arg("--maxmem")
-        .arg("1G")
-        .assert()
-        .success();
-}
-
+//     // Run nucleaze with enough memory allocated
+//     Command::cargo_bin("nucleaze")
+//         .unwrap()
+//         .arg("--in")
+//         .arg(reads_path.to_str().unwrap())
+//         .arg("--ref")
+//         .arg(ref_path.to_str().unwrap())
+//         .arg("--k")
+//         .arg("21")
+//         .arg("--maxmem")
+//         .arg("1G")
+//         .assert()
+//         .success();
+// }
 #[test]
 fn test_duplicate_read_files() {
     let temp = TempDir::new().unwrap();
@@ -525,7 +569,7 @@ fn test_duplicate_read_files() {
     )
     .unwrap();
 
-    Command::cargo_bin("nuclease")
+    Command::cargo_bin("nucleaze")
         .unwrap()
         .arg("--in")
         .arg(reads_path.to_str().unwrap())
@@ -562,7 +606,7 @@ fn test_minhits_threshold() {
     .unwrap();
 
     // With minhits=1, should match
-    Command::cargo_bin("nuclease")
+    Command::cargo_bin("nucleaze")
         .unwrap()
         .arg("--in")
         .arg(reads_path.to_str().unwrap())
@@ -605,7 +649,7 @@ fn test_fasta_output_format() {
     )
     .unwrap();
 
-    Command::cargo_bin("nuclease")
+    Command::cargo_bin("nucleaze")
         .unwrap()
         .arg("--in")
         .arg(reads_path.to_str().unwrap())
@@ -624,7 +668,7 @@ fn test_fasta_output_format() {
     assert!(!matched.contains("+"));
     assert!(!matched.contains("IIIIIIIIIIIIIIIIIIIII"));
 
-    Command::cargo_bin("nuclease")
+    Command::cargo_bin("nucleaze")
         .unwrap()
         .arg("--in")
         .arg(reads_path.to_str().unwrap())
@@ -645,7 +689,7 @@ fn test_fasta_output_format() {
 
 #[test]
 fn test_missing_required_args() {
-    Command::cargo_bin("nuclease").unwrap().assert().failure();
+    Command::cargo_bin("nucleaze").unwrap().assert().failure();
 }
 
 #[test]
@@ -668,7 +712,7 @@ fn test_threads_argument() {
     )
     .unwrap();
 
-    Command::cargo_bin("nuclease")
+    Command::cargo_bin("nucleaze")
         .unwrap()
         .arg("--in")
         .arg(reads_path.to_str().unwrap())
