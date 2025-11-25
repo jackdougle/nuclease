@@ -128,7 +128,7 @@ struct Args {
     order: bool,
 
     #[arg(long)]
-    arena: usize,
+    arena: Option<usize>,
 }
 
 fn main() -> io::Result<()> {

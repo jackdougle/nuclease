@@ -50,7 +50,7 @@ pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
     let k = args.k.unwrap_or(21);
     let min_hits = args.minhits.unwrap_or(1);
     let ordered_output = args.order;
-    let arena_capacity: usize = args.arena * 1000;
+    let arena_capacity: usize = args.arena.unwrap_or(400) * 1000;
 
     let ref_path = args.r#ref;
     let bin_kmers_path = &args.binref.unwrap_or_default();
