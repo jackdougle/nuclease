@@ -73,14 +73,16 @@ pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
         }
         Err(e) => {
             eprintln!("\nInvalid serialized reference file: {}", e);
-            println!("Loading ref k-mers from {}", ref_path);
-
+            
             match get_reference_kmers(&ref_path, &mut kmer_processor) {
-                Ok(()) => println!(
+                Ok(()) => {
+                println!("Loading ref k-mers from {}", ref_path);
+                println!(
                     "Added {} from {}",
                     kmer_processor.ref_kmers.iter().size_hint().0 - 1,
                     ref_path,
-                ),
+                );
+                }
                 Err(e) => {
                     eprintln!("\nError loading reference sequences: {}", e);
                     std::process::exit(1);
@@ -177,7 +179,7 @@ fn load_serialized_kmers(
     let size_metadata = u64::MAX ^ processor.k as u64;
     if !processor.ref_kmers.contains(&size_metadata) {
         processor.ref_kmers.clear();
-        return Err(format!("k-mers are of different length").into());
+        return Err(format!("k-mers are of different length than specified k (default k = 21)").into());
     }
 
     Ok(())
