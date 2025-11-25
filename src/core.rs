@@ -1,3 +1,5 @@
+//! I/O and processing operations for filtering read sequences based on kmer similarity
+
 use crate::kmer_ops::KmerProcessor;
 use bincode::{config, decode_from_std_read, encode_into_std_write};
 use needletail::parse_fastx_file;
@@ -14,18 +16,20 @@ use std::time::Instant;
 use std::{fs, io, u32};
 use std::{thread, usize};
 
+/// A chunk of sequences with their match results
+/// Stored as a single arena to minimize allocations
 #[derive(Eq, PartialEq)]
 struct SequenceChunk {
     id: u32,
-    data_arena: Vec<u8>,
-    offsets: Vec<(u32, u32, u32, u32, u32, u32)>,
-    matches: Vec<bool>,
+    data_arena: Vec<u8>,                          // raw bytes for all sequences
+    offsets: Vec<(u32, u32, u32, u32, u32, u32)>, // (id_start, id_len, seq_start, seq_len, qual_start, qual_len)
+    matches: Vec<bool>,                           // k-mer match results
 }
 
-// Implement Ord for BinaryHeap to support Ordered Output
+// Implement Ord for BinaryHeap to support ordered output
 impl Ord for SequenceChunk {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.id.cmp(&self.id) 
+        other.id.cmp(&self.id) // min-heap for sequential processing
     }
 }
 
@@ -35,6 +39,7 @@ impl PartialOrd for SequenceChunk {
     }
 }
 
+/// Main entry point for processing reads against a reference k-mer index
 pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
     let available_threads = num_cpus::get();
 
@@ -45,6 +50,7 @@ pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
     let k = args.k.unwrap_or(21);
     let min_hits = args.minhits.unwrap_or(1);
     let ordered_output = args.order;
+    let arena_capacity: usize = args.arena * 1000;
 
     let ref_path = args.r#ref;
     let bin_kmers_path = &args.binref.unwrap_or_default();
@@ -52,6 +58,7 @@ pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
 
     let mut kmer_processor = KmerProcessor::new(k, min_hits);
 
+    // Try loading pre-built k-mer index, otherwise build from scratch
     match load_serialized_kmers(bin_kmers_path, &mut kmer_processor) {
         Ok(()) => {
             println!(
@@ -117,6 +124,7 @@ pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
         &outu2_path,
         process_mode,
         ordered_output,
+        arena_capacity,
     ) {
         Ok((mseq_count, mbase_count, useq_count, ubase_count)) => {
             let read_count = mseq_count + useq_count;
@@ -152,6 +160,7 @@ pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
     Ok(())
 }
 
+/// Load a pre-built k-mer index from binary file
 fn load_serialized_kmers(
     bin_kmers_path: &str,
     processor: &mut KmerProcessor,
@@ -161,6 +170,7 @@ fn load_serialized_kmers(
 
     processor.ref_kmers = decode_from_std_read(&mut reader, config::standard())?;
 
+    // Verify k-mer length matches by checking metadata
     let size_metadata = u64::MAX ^ processor.k as u64;
     if !processor.ref_kmers.contains(&size_metadata) {
         processor.ref_kmers.clear();
@@ -170,6 +180,7 @@ fn load_serialized_kmers(
     Ok(())
 }
 
+/// Build k-mer index from reference FASTA/FASTQ file
 fn get_reference_kmers(
     ref_path: &str,
     processor: &mut KmerProcessor,
@@ -183,6 +194,7 @@ fn get_reference_kmers(
     Ok(())
 }
 
+/// Save k-mer index to binary file for faster loading later
 fn serialize_kmers(path: &str, processor: &mut KmerProcessor) -> Result<(), Box<dyn Error>> {
     let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
@@ -196,13 +208,14 @@ fn serialize_kmers(path: &str, processor: &mut KmerProcessor) -> Result<(), Box<
 #[derive(PartialEq, Clone, Copy, Debug, Default)]
 enum ProcessMode {
     #[default]
-    Unpaired,
-    Paired,
-    PairedInInterOut,
-    InterInPairedOut,
-    Interleaved,
+    Unpaired, // single-end reads
+    Paired,           // paired-end in two files, output to two files
+    PairedInInterOut, // paired-end in two files, interleaved output
+    InterInPairedOut, // interleaved input, paired-end output
+    Interleaved,      // interleaved input and output
 }
 
+/// Determine input/output mode based on file arguments
 fn detect_mode(
     reads2_path: &Option<String>,
     matched2_path: &Option<String>,
@@ -247,6 +260,8 @@ fn detect_mode(
     }
 }
 
+/// Process reads from input file(s), filter by k-mer matches, and write to output file(s)
+/// Returns (matched_count, matched_bases, unmatched_count, unmatched_bases)
 fn process_reads(
     reads_path: String,
     reads2_path: String,
@@ -257,17 +272,17 @@ fn process_reads(
     unmatched2_path: &str,
     process_mode: ProcessMode,
     ordered_output: bool,
+    arena_capacity: usize,
 ) -> Result<(u32, u32, u32, u32), Box<dyn Error + Send + Sync>> {
     let processor = Arc::new(processor);
 
-    let (chunk_sender, chunk_receiver): (
-        SyncSender<SequenceChunk>,
-        Receiver<SequenceChunk>,
-    ) = sync_channel(20);
+    // Channel for passing chunks from reader thread to writer
+    let (chunk_sender, chunk_receiver): (SyncSender<SequenceChunk>, Receiver<SequenceChunk>) =
+        sync_channel(20);
 
     let chunk_idx = Arc::new(AtomicU32::new(0));
-    
-    // Metadata for writers
+
+    // Extract file extensions and detect stdout usage
     let matched_filetype = matched_path.rsplit('.').next().unwrap_or("").to_string();
     let unmatched_filetype = unmatched_path.rsplit('.').next().unwrap_or("").to_string();
     let matched2_filetype = matched2_path.rsplit('.').next().unwrap_or("").to_string();
@@ -279,7 +294,8 @@ fn process_reads(
 
     let parallel_sender = chunk_sender.clone();
     let parellel_chunk_idx = chunk_idx.clone();
-    
+
+    // Worker thread: reads sequences and dispatches chunks to Rayon for parallel k-mer processing
     let worker_thread = thread::spawn(move || -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut reader = if reads_path == "stdin" || reads_path.starts_with("stdin.") {
             needletail::parse_fastx_reader(io::stdin())
@@ -288,190 +304,296 @@ fn process_reads(
         }?;
 
         const CHUNK_SIZE: usize = 10_000;
-        const ARENA_CAPACITY: usize = CHUNK_SIZE * 400; 
+        const ARENA_CAPACITY: usize = CHUNK_SIZE * 400;
 
-        // Current chunk state
-        let mut arena: Vec<u8> = Vec::with_capacity(ARENA_CAPACITY);
+        // Current chunk being built
+        let mut arena: Vec<u8> = Vec::with_capacity(arena_capacity);
         let mut offsets: Vec<(u32, u32, u32, u32, u32, u32)> = Vec::with_capacity(CHUNK_SIZE);
-        
-        // Helper: Dispatches the filled arena to Rayon for k-mer processing
-        let mut process_and_send = |mut local_arena: Vec<u8>, local_offsets: Vec<(u32, u32, u32, u32, u32, u32)>| {
-            let processor = processor.clone();
-            let sender = parallel_sender.clone();
-            let current_chunk_idx = parellel_chunk_idx.fetch_add(1, AtomicOrdering::SeqCst);
 
-            rayon::spawn(move || {
-                // Parallel Processing Step:
-                // We map over the OFFSETS, creating temporary slices into the ARENA.
-                // This does NOT allocate new memory for sequences.
-                let matches: Vec<bool> = local_offsets.par_iter()
-                    .map(|(_, _, seq_start, seq_len, _, _)| {
-                        // Safe slice access due to offsets logic
-                        let seq = &local_arena[*seq_start as usize..(*seq_start + *seq_len) as usize];
-                        processor.process_read(seq)
-                    })
-                    .collect();
+        // Dispatch filled arena to Rayon for parallel k-mer processing
+        let process_arena =
+            |local_arena: Vec<u8>, local_offsets: Vec<(u32, u32, u32, u32, u32, u32)>| {
+                let processor = processor.clone();
+                let sender = parallel_sender.clone();
+                let current_chunk_idx = parellel_chunk_idx.fetch_add(1, AtomicOrdering::SeqCst);
 
-                let chunk = SequenceChunk {
-                    id: current_chunk_idx,
-                    data_arena: local_arena,
-                    offsets: local_offsets,
-                    matches,
-                };
+                rayon::spawn(move || {
+                    // Parallel k-mer matching: map over offsets to create slices into arena
+                    // This avoids copying sequence data
+                    let matches: Vec<bool> = local_offsets
+                        .par_iter()
+                        .map(|(_, _, seq_start, seq_len, _, _)| {
+                            let seq =
+                                &local_arena[*seq_start as usize..(*seq_start + *seq_len) as usize];
+                            processor.process_read(seq)
+                        })
+                        .collect();
 
-                // Blocks if channel is full (Backpressure)
-                let _ = sender.send(chunk);
-            });
-        };
+                    let chunk = SequenceChunk {
+                        id: current_chunk_idx,
+                        data_arena: local_arena,
+                        offsets: local_offsets,
+                        matches,
+                    };
 
-        // Helper: Pushes one record into the arena
-        let mut push_record = |id: &[u8], seq: &[u8], qual: &[u8], arena: &mut Vec<u8>, offsets: &mut Vec<(u32, u32, u32, u32, u32, u32)>| {
-            let id_start = arena.len() as u32;
-            arena.extend_from_slice(id);
-            let id_len = (arena.len() as u32) - id_start;
+                    // Blocks if channel is full (backpressure)
+                    let _ = sender.send(chunk);
+                });
+            };
 
-            let seq_start = arena.len() as u32;
-            arena.extend_from_slice(seq);
-            let seq_len = (arena.len() as u32) - seq_start;
+        // Add one record to the arena
+        let push_record =
+            |id: &[u8],
+             seq: &[u8],
+             qual: &[u8],
+             arena: &mut Vec<u8>,
+             offsets: &mut Vec<(u32, u32, u32, u32, u32, u32)>| {
+                let id_start = arena.len() as u32;
+                arena.extend_from_slice(id);
+                let id_len = (arena.len() as u32) - id_start;
 
-            let qual_start = arena.len() as u32;
-            arena.extend_from_slice(qual);
-            let qual_len = (arena.len() as u32) - qual_start;
+                let seq_start = arena.len() as u32;
+                arena.extend_from_slice(seq);
+                let seq_len = (arena.len() as u32) - seq_start;
 
-            offsets.push((id_start, id_len, seq_start, seq_len, qual_start, qual_len));
-        };
+                let qual_start = arena.len() as u32;
+                arena.extend_from_slice(qual);
+                let qual_len = (arena.len() as u32) - qual_start;
 
-        // Processing Loop
-        if process_mode == ProcessMode::Unpaired || process_mode == ProcessMode::Interleaved || process_mode == ProcessMode::InterInPairedOut {
-             while let Some(record) = reader.next() {
+                offsets.push((id_start, id_len, seq_start, seq_len, qual_start, qual_len));
+            };
+
+        // Read and chunk sequences based on mode
+        if process_mode == ProcessMode::Unpaired
+            || process_mode == ProcessMode::Interleaved
+            || process_mode == ProcessMode::InterInPairedOut
+        {
+            while let Some(record) = reader.next() {
                 let record = record?;
-                // FIX: Added & to record.seq() to borrow the Cow<[u8]>
-                push_record(record.id(), &record.seq(), record.qual().unwrap_or(b""), &mut arena, &mut offsets);
+                push_record(
+                    record.id(),
+                    &record.seq(),
+                    record.qual().unwrap_or(b""),
+                    &mut arena,
+                    &mut offsets,
+                );
 
                 if offsets.len() == CHUNK_SIZE {
-                    // "Double Buffering": Swap current buffers with fresh pre-allocated ones
-                    let local_arena = std::mem::replace(&mut arena, Vec::with_capacity(ARENA_CAPACITY));
-                    let local_offsets = std::mem::replace(&mut offsets, Vec::with_capacity(CHUNK_SIZE));
-                    process_and_send(local_arena, local_offsets);
+                    // Double buffering: swap buffers and dispatch filled one
+                    let local_arena =
+                        std::mem::replace(&mut arena, Vec::with_capacity(ARENA_CAPACITY));
+                    let local_offsets =
+                        std::mem::replace(&mut offsets, Vec::with_capacity(CHUNK_SIZE));
+                    process_arena(local_arena, local_offsets);
                 }
             }
         } else {
-             // Paired modes (require two readers)
-             let mut reader2 = parse_fastx_file(&reads2_path)?;
-             while let (Some(record1), Some(record2)) = (reader.next(), reader2.next()) {
-                 let record1 = record1?;
-                 let record2 = record2?;
-                 
-                 // FIX: Added & to record.seq() to borrow the Cow<[u8]>
-                 push_record(record1.id(), &record1.seq(), record1.qual().unwrap_or(b""), &mut arena, &mut offsets);
-                 push_record(record2.id(), &record2.seq(), record2.qual().unwrap_or(b""), &mut arena, &mut offsets);
+            // Paired modes: read from two files simultaneously
+            let mut reader2 = parse_fastx_file(&reads2_path)?;
+            while let (Some(record1), Some(record2)) = (reader.next(), reader2.next()) {
+                let record1 = record1?;
+                let record2 = record2?;
 
-                 if offsets.len() == CHUNK_SIZE {
-                    let local_arena = std::mem::replace(&mut arena, Vec::with_capacity(ARENA_CAPACITY));
-                    let local_offsets = std::mem::replace(&mut offsets, Vec::with_capacity(CHUNK_SIZE));
-                    process_and_send(local_arena, local_offsets);
-                 }
-             }
+                push_record(
+                    record1.id(),
+                    &record1.seq(),
+                    record1.qual().unwrap_or(b""),
+                    &mut arena,
+                    &mut offsets,
+                );
+                push_record(
+                    record2.id(),
+                    &record2.seq(),
+                    record2.qual().unwrap_or(b""),
+                    &mut arena,
+                    &mut offsets,
+                );
+
+                if offsets.len() == CHUNK_SIZE {
+                    let local_arena =
+                        std::mem::replace(&mut arena, Vec::with_capacity(ARENA_CAPACITY));
+                    let local_offsets =
+                        std::mem::replace(&mut offsets, Vec::with_capacity(CHUNK_SIZE));
+                    process_arena(local_arena, local_offsets);
+                }
+            }
         }
 
-        // Process remaining items
+        // Process remaining sequences
         if !offsets.is_empty() {
-             process_and_send(arena, offsets);
+            process_arena(arena, offsets);
         }
 
         Ok(())
     });
 
-    // Close channel from this side so receiver knows when to stop
+    // Close channel from sender side so receiver knows when to stop
     drop(chunk_sender);
 
     let mut matched_writer: BufWriter<File> = BufWriter::new(File::create(matched_path)?);
-    let mut unmatched_writer: BufWriter<File> = BufWriter::with_capacity(4_000_000, File::create(unmatched_path)?);
+    let mut unmatched_writer: BufWriter<File> =
+        BufWriter::with_capacity(4_000_000, File::create(unmatched_path)?);
 
     // Optional writers for paired output splitting
-    let mut m2_writer = if process_mode == ProcessMode::InterInPairedOut || process_mode == ProcessMode::Paired {
-        Some(BufWriter::new(File::create(matched2_path)?))
-    } else { None };
-    let mut u2_writer = if process_mode == ProcessMode::InterInPairedOut || process_mode == ProcessMode::Paired {
-        Some(BufWriter::new(File::create(unmatched2_path)?))
-    } else { None };
+    let mut m2_writer =
+        if process_mode == ProcessMode::InterInPairedOut || process_mode == ProcessMode::Paired {
+            Some(BufWriter::new(File::create(matched2_path)?))
+        } else {
+            None
+        };
+    let mut u2_writer =
+        if process_mode == ProcessMode::InterInPairedOut || process_mode == ProcessMode::Paired {
+            Some(BufWriter::new(File::create(unmatched2_path)?))
+        } else {
+            None
+        };
 
     let matched_count = Arc::new(AtomicU32::new(0));
     let matched_bases = Arc::new(AtomicU32::new(0));
     let unmatched_count = Arc::new(AtomicU32::new(0));
     let unmatched_bases = Arc::new(AtomicU32::new(0));
 
-    // Shared Writer Function: Writes a SequenceChunk to disk
-    // This closure abstracts the logic of reconstructing reads from the arena.
-    let mut write_chunk_logic = |chunk: &SequenceChunk| -> Result<(), Box<dyn Send + Sync + Error>> {
-        let arena = &chunk.data_arena;
-        let offsets = &chunk.offsets;
-        let matches = &chunk.matches;
+    // Write a SequenceChunk to disk, reconstructing reads from the arena
+    let mut write_chunk_logic =
+        |chunk: &SequenceChunk| -> Result<(), Box<dyn Send + Sync + Error>> {
+            let arena = &chunk.data_arena;
+            let offsets = &chunk.offsets;
+            let matches = &chunk.matches;
 
-        // Helper to slice arena
-        let get_read = |idx: usize| {
-            let (id_s, id_l, seq_s, seq_l, qual_s, qual_l) = offsets[idx];
-            (
-                &arena[id_s as usize .. (id_s + id_l) as usize],
-                &arena[seq_s as usize .. (seq_s + seq_l) as usize],
-                &arena[qual_s as usize .. (qual_s + qual_l) as usize]
-            )
+            // Slice arena to reconstruct individual read
+            let get_read = |idx: usize| {
+                let (id_s, id_l, seq_s, seq_l, qual_s, qual_l) = offsets[idx];
+                (
+                    &arena[id_s as usize..(id_s + id_l) as usize],
+                    &arena[seq_s as usize..(seq_s + seq_l) as usize],
+                    &arena[qual_s as usize..(qual_s + qual_l) as usize],
+                )
+            };
+
+            if process_mode == ProcessMode::Unpaired {
+                for i in 0..offsets.len() {
+                    let (id, seq, qual) = get_read(i);
+                    if matches[i] {
+                        write_read(
+                            &mut matched_writer,
+                            id,
+                            seq,
+                            qual,
+                            &matched_filetype,
+                            matched_stdout,
+                        )?;
+                        matched_count.fetch_add(1, AtomicOrdering::Relaxed);
+                        matched_bases.fetch_add(seq.len() as u32, AtomicOrdering::Relaxed);
+                    } else {
+                        write_read(
+                            &mut unmatched_writer,
+                            id,
+                            seq,
+                            qual,
+                            &unmatched_filetype,
+                            unmatched_stdout,
+                        )?;
+                        unmatched_count.fetch_add(1, AtomicOrdering::Relaxed);
+                        unmatched_bases.fetch_add(seq.len() as u32, AtomicOrdering::Relaxed);
+                    }
+                }
+            } else {
+                // Paired-end: process reads in pairs (stride 2)
+                // If either read matches, both are written to matched output
+                for i in (0..offsets.len()).step_by(2) {
+                    let has_match = matches[i] || matches[i + 1];
+                    let (id1, seq1, qual1) = get_read(i);
+                    let (id2, seq2, qual2) = get_read(i + 1);
+
+                    let (w1, w2, count, bases) = if has_match {
+                        (
+                            &mut matched_writer,
+                            m2_writer.as_mut(),
+                            &matched_count,
+                            &matched_bases,
+                        )
+                    } else {
+                        (
+                            &mut unmatched_writer,
+                            u2_writer.as_mut(),
+                            &unmatched_count,
+                            &unmatched_bases,
+                        )
+                    };
+
+                    write_read(
+                        w1,
+                        id1,
+                        seq1,
+                        qual1,
+                        if has_match {
+                            &matched_filetype
+                        } else {
+                            &unmatched_filetype
+                        },
+                        if has_match {
+                            matched_stdout
+                        } else {
+                            unmatched_stdout
+                        },
+                    )?;
+
+                    if let Some(w2_real) = w2 {
+                        write_read(
+                            w2_real,
+                            id2,
+                            seq2,
+                            qual2,
+                            if has_match {
+                                &matched2_filetype
+                            } else {
+                                &unmatched2_filetype
+                            },
+                            if has_match {
+                                matched2_stdout
+                            } else {
+                                unmatched2_stdout
+                            },
+                        )?;
+                    } else {
+                        write_read(
+                            w1,
+                            id2,
+                            seq2,
+                            qual2,
+                            if has_match {
+                                &matched_filetype
+                            } else {
+                                &unmatched_filetype
+                            },
+                            if has_match {
+                                matched_stdout
+                            } else {
+                                unmatched_stdout
+                            },
+                        )?;
+                    }
+
+                    count.fetch_add(2, AtomicOrdering::Relaxed);
+                    bases.fetch_add((seq1.len() + seq2.len()) as u32, AtomicOrdering::Relaxed);
+                }
+            }
+            Ok(())
         };
 
-        if process_mode == ProcessMode::Unpaired {
-            for i in 0..offsets.len() {
-                let (id, seq, qual) = get_read(i);
-                if matches[i] {
-                    write_read(&mut matched_writer, id, seq, qual, &matched_filetype, matched_stdout)?;
-                    matched_count.fetch_add(1, AtomicOrdering::Relaxed);
-                    matched_bases.fetch_add(seq.len() as u32, AtomicOrdering::Relaxed);
-                } else {
-                    write_read(&mut unmatched_writer, id, seq, qual, &unmatched_filetype, unmatched_stdout)?;
-                    unmatched_count.fetch_add(1, AtomicOrdering::Relaxed);
-                    unmatched_bases.fetch_add(seq.len() as u32, AtomicOrdering::Relaxed);
-                }
-            }
-        } else {
-            // Paired logic (stride 2)
-            for i in (0..offsets.len()).step_by(2) {
-                // If either read in pair is a match, the whole pair is a match
-                let has_match = matches[i] || matches[i+1];
-                let (id1, seq1, qual1) = get_read(i);
-                let (id2, seq2, qual2) = get_read(i+1);
-                
-                let (w1, w2, count, bases) = if has_match {
-                    (&mut matched_writer, m2_writer.as_mut(), &matched_count, &matched_bases)
-                } else {
-                    (&mut unmatched_writer, u2_writer.as_mut(), &unmatched_count, &unmatched_bases)
-                };
-
-                write_read(w1, id1, seq1, qual1, if has_match { &matched_filetype } else { &unmatched_filetype }, if has_match { matched_stdout } else { unmatched_stdout })?;
-                
-                if let Some(w2_real) = w2 {
-                     write_read(w2_real, id2, seq2, qual2, if has_match { &matched2_filetype } else { &unmatched2_filetype }, if has_match { matched2_stdout } else { unmatched2_stdout })?;
-                } else {
-                     write_read(w1, id2, seq2, qual2, if has_match { &matched_filetype } else { &unmatched_filetype }, if has_match { matched_stdout } else { unmatched_stdout })?;
-                }
-                
-                count.fetch_add(2, AtomicOrdering::Relaxed);
-                bases.fetch_add((seq1.len() + seq2.len()) as u32, AtomicOrdering::Relaxed);
-            }
-        }
-        Ok(())
-    };
-
     if ordered_output {
+        // Ordered mode: use min-heap to reorder chunks as they arrive
         let mut out_of_order_buffer: BinaryHeap<SequenceChunk> = BinaryHeap::new();
         let mut next_chunk_id = 0;
         const MAX_BUFFERED_CHUNKS: usize = 1000;
 
         for chunk in chunk_receiver {
             if chunk.id == next_chunk_id {
-                // Happy path: chunk arrived in order
+                // Chunk arrived in order
                 write_chunk_logic(&chunk)?;
                 next_chunk_id += 1;
 
-                // Check if subsequent chunks are already waiting
+                // Check if subsequent chunks are already buffered
                 while let Some(buffered) = out_of_order_buffer.peek() {
                     if buffered.id == next_chunk_id {
                         let buffered = out_of_order_buffer.pop().unwrap();
@@ -482,14 +604,14 @@ fn process_reads(
                     }
                 }
             } else {
-                // If chunk arrives early, buffer it
+                // Chunk arrived early, buffer it
                 out_of_order_buffer.push(chunk);
                 if out_of_order_buffer.len() > MAX_BUFFERED_CHUNKS {
                     return Err(Box::from("Too many out-of-order chunks buffered."));
                 }
             }
         }
-        // Drain any remaining in-order chunks
+        // Drain remaining buffered chunks
         while let Some(buffered) = out_of_order_buffer.pop() {
             if buffered.id == next_chunk_id {
                 write_chunk_logic(&buffered)?;
@@ -498,9 +620,8 @@ fn process_reads(
                 return Err(Box::from("Missing chunk in ordered output stream."));
             }
         }
-
     } else {
-        // Unordered mode: Just process as they arrive
+        // Unordered mode: write chunks as they arrive
         for chunk in chunk_receiver {
             write_chunk_logic(&chunk)?;
         }
@@ -508,15 +629,24 @@ fn process_reads(
 
     matched_writer.flush()?;
     unmatched_writer.flush()?;
-    if let Some(mut w) = m2_writer { w.flush()?; }
-    if let Some(mut w) = u2_writer { w.flush()?; }
-    
+    if let Some(mut w) = m2_writer {
+        w.flush()?;
+    }
+    if let Some(mut w) = u2_writer {
+        w.flush()?;
+    }
+
     worker_thread.join().unwrap()?;
 
-    // Cleanup stdout temporary files
-    for path in [&matched_path, unmatched_path, matched2_path, unmatched2_path] {
+    // Clean up temporary stdout files
+    for path in [
+        &matched_path,
+        unmatched_path,
+        matched2_path,
+        unmatched2_path,
+    ] {
         if path.starts_with("stdout") {
-             let _ = fs::remove_file(path);
+            let _ = fs::remove_file(path);
         }
     }
 
@@ -528,6 +658,7 @@ fn process_reads(
     ))
 }
 
+/// Write a single read to file in FASTA or FASTQ format
 fn write_read(
     writer: &mut BufWriter<File>,
     id: &[u8],
@@ -540,8 +671,8 @@ fn write_read(
         unsafe {
             let s_id = std::str::from_utf8_unchecked(id);
             let s_seq = std::str::from_utf8_unchecked(sequence);
-            
-            if format == "fa" || format == "fna" || format == "fasta"  { // matches fa, fna, fasta
+
+            if format == "fa" || format == "fna" || format == "fasta" {
                 println!(">\n{}\n{}", s_id, s_seq);
             } else {
                 let s_qual = std::str::from_utf8_unchecked(quality);

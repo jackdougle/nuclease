@@ -1,10 +1,7 @@
 /.vscode
 **/.DS_Store
 
-/in
-/out
-/ref
-
+/env
 /misc
 
 /release
@@ -13,4 +10,5 @@
 *.gz
 *.json
 
-/env
+*.fq
+*.fa

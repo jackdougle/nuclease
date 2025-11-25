@@ -126,6 +126,9 @@ struct Args {
     /// Enabling flag causes ordered output
     #[arg(short, long)]
     order: bool,
+
+    #[arg(long)]
+    arena: usize,
 }
 
 fn main() -> io::Result<()> {
@@ -144,8 +147,9 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
+/// Validate command-line arguments to catch common errors early
 fn validate_args(args: &Args) -> io::Result<()> {
-    // Check input files aren't the same
+    // Prevent using same file for both inputs
     if let Some(ref in2) = args.in2 {
         if args.r#in == *in2 {
             return Err(io::Error::new(
@@ -155,7 +159,7 @@ fn validate_args(args: &Args) -> io::Result<()> {
         }
     }
 
-    // Check output files aren't the same (if provided)
+    // Prevent using same file for matched and unmatched outputs
     if let (Some(outm), Some(outu)) = (&args.outm, &args.outu) {
         if outm == outu {
             return Err(io::Error::new(
@@ -165,7 +169,7 @@ fn validate_args(args: &Args) -> io::Result<()> {
         }
     }
 
-    // Check paired outputs if provided and that they aren't the same
+    // Prevent using same file for paired matched and unmatched outputs
     if let (Some(outm2), Some(outu2)) = (&args.outm2, &args.outu2) {
         if outm2 == outu2 {
             return Err(io::Error::new(

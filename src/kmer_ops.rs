@@ -3,11 +3,12 @@ use std::u64;
 
 use rustc_hash::FxHashSet;
 
+/// K-mer processor for building reference indices and filtering reads
 pub struct KmerProcessor {
-    pub k: usize,
-    pub threshold: u8,
-    pub ref_kmers: FxHashSet<u64>,
-    pub bit_cap: u64,
+    pub k: usize,                  // k-mer size in bases
+    pub threshold: u8,             // minimum k-mer hits to consider a match
+    pub ref_kmers: FxHashSet<u64>, // set of canonical k-mers from reference
+    pub bit_cap: u64,              // bitmask for k-mer length
 }
 
 impl KmerProcessor {
@@ -20,11 +21,14 @@ impl KmerProcessor {
         }
     }
 
+    /// Build reference k-mer index from a sequence
+    /// Stores canonical k-mers (lexicographically smaller of forward/reverse complement)
     pub fn process_ref(&mut self, ref_seq: &[u8]) {
         if ref_seq.len() < self.k {
             panic!("Read sequence is shorter than k");
         }
 
+        // Insert metadata on first call to store k-mer size
         if self.ref_kmers.is_empty() {
             let metadata = u64::MAX ^ self.k as u64;
             self.ref_kmers.insert(metadata);
@@ -35,19 +39,25 @@ impl KmerProcessor {
 
         for i in 0..=ref_seq.len() - self.k {
             if i == 0 {
+                // Encode first k-mer from scratch
                 forward_kmer = encode_forward(&ref_seq[0..self.k]);
                 reverse_kmer = encode_reverse(&ref_seq[0..self.k]);
             } else {
+                // Sliding window: shift left and add new base
                 forward_kmer = ((forward_kmer << 2) | encode_forward(&[ref_seq[i + self.k - 1]]))
                     & self.bit_cap;
+                // Sliding window: shift right and add new base at MSB
                 reverse_kmer = ((reverse_kmer >> 2)
                     | (encode_reverse(&[ref_seq[i + self.k - 1]]) << (2 * (self.k - 1))))
                     & self.bit_cap;
             }
+            // Store canonical k-mer (smaller of forward/RC)
             self.ref_kmers.insert(min(forward_kmer, reverse_kmer));
         }
     }
 
+    /// Check if a read has enough matching k-mers against the reference
+    /// Returns true if >= threshold k-mers are found
     pub fn process_read(&self, read_seq: &[u8]) -> bool {
         if read_seq.len() < self.k {
             println!(
@@ -79,7 +89,7 @@ impl KmerProcessor {
             if self.ref_kmers.contains(&canonical) {
                 hits += 1;
                 if hits >= self.threshold {
-                    return true;
+                    return true; // early exit once threshold met
                 }
             }
         }
@@ -88,6 +98,8 @@ impl KmerProcessor {
     }
 }
 
+/// Encode nucleotide sequence to 2-bit representation in forward orientation
+/// A=00, C=01, G=10, T=11
 #[inline(always)]
 pub fn encode_forward(seq: &[u8]) -> u64 {
     static FORWARD_BASE_TABLE: [u8; 85] = {
@@ -106,14 +118,16 @@ pub fn encode_forward(seq: &[u8]) -> u64 {
     })
 }
 
+/// Encode nucleotide sequence to 2-bit representation in reverse complement orientation
+/// A=11, C=10, G=01, T=00 (complement mapping)
 #[inline(always)]
 pub fn encode_reverse(seq: &[u8]) -> u64 {
     static REVERSE_BASE_TABLE: [u8; 85] = {
         let mut bases = [0u8; 85];
-        bases[b'A' as usize] = 0b11;
-        bases[b'C' as usize] = 0b10;
-        bases[b'G' as usize] = 0b01;
-        bases[b'T' as usize] = 0b00;
+        bases[b'A' as usize] = 0b11; // T complement
+        bases[b'C' as usize] = 0b10; // G complement
+        bases[b'G' as usize] = 0b01; // C complement
+        bases[b'T' as usize] = 0b00; // A complement
         bases
     };
 
