@@ -21,7 +21,7 @@ USAGE: nucleaze --in <reads file> --ref <ref file> ...
 INPUT PARAMETERS
     --in <file>         Input FASTA/FASTQ file containing reads to be filtered.
                         Use 'stdin.fq' or 'stdin' to pipe from stdin.
-    --in2 <file>        (Optional) Second input file for 2nd pair of reads. 
+    --in2 <file>        Second input file for 2nd pair of reads. 
                         Must be same length as main input file.
     --ref <file>        (-r) Reference FASTA/FASTQ file containing sequences to
                         build reference k-mer index. Program will serialize
@@ -85,7 +85,7 @@ struct Args {
 
     /// FASTA/FASTQ path for reference sequences
     #[arg(long)]
-    r#ref: String,
+    r#ref: Option<String>,
 
     /// FASTA/FASTQ path for read sequences
     #[arg(long)]
@@ -126,9 +126,6 @@ struct Args {
     /// Enabling flag causes ordered output
     #[arg(short, long)]
     order: bool,
-
-    #[arg(long)]
-    arena: Option<usize>,
 }
 
 fn main() -> io::Result<()> {

@@ -50,10 +50,14 @@ pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
     let k = args.k.unwrap_or(21);
     let min_hits = args.minhits.unwrap_or(1);
     let ordered_output = args.order;
-    let arena_capacity: usize = args.arena.unwrap_or(400) * 1000;
 
-    let ref_path = args.r#ref;
+    let ref_path = args.r#ref.unwrap_or_default();
     let bin_kmers_path = &args.binref.unwrap_or_default();
+    if ref_path.is_empty() && bin_kmers_path.is_empty() {
+        eprintln!("Error: Please provide either a reference file (--ref) or a binary k-mer index file (--binref).");
+        std::process::exit(1);
+    }
+
     let new_bin_kmers_path = &args.saveref.unwrap_or_default();
 
     let mut kmer_processor = KmerProcessor::new(k, min_hits);
@@ -124,7 +128,6 @@ pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
         &outu2_path,
         process_mode,
         ordered_output,
-        arena_capacity,
     ) {
         Ok((mseq_count, mbase_count, useq_count, ubase_count)) => {
             let read_count = mseq_count + useq_count;
@@ -272,7 +275,6 @@ fn process_reads(
     unmatched2_path: &str,
     process_mode: ProcessMode,
     ordered_output: bool,
-    arena_capacity: usize,
 ) -> Result<(u32, u32, u32, u32), Box<dyn Error + Send + Sync>> {
     let processor = Arc::new(processor);
 
@@ -304,10 +306,10 @@ fn process_reads(
         }?;
 
         const CHUNK_SIZE: usize = 10_000;
-        const ARENA_CAPACITY: usize = CHUNK_SIZE * 400;
+        const ARENA_CAPACITY: usize = CHUNK_SIZE * 500;
 
         // Current chunk being built
-        let mut arena: Vec<u8> = Vec::with_capacity(arena_capacity);
+        let mut arena: Vec<u8> = Vec::with_capacity(ARENA_CAPACITY);
         let mut offsets: Vec<(u32, u32, u32, u32, u32, u32)> = Vec::with_capacity(CHUNK_SIZE);
 
         // Dispatch filled arena to Rayon for parallel k-mer processing
