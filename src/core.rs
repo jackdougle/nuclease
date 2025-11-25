@@ -14,39 +14,26 @@ use std::time::Instant;
 use std::{fs, io, u32};
 use std::{thread, usize};
 
-// --- ARCHITECTURE CHANGE: SmartChunk (Arena Allocation) ---
-// Previous logic used Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)>, causing
-// 3 allocations per read (~30,000 allocations per chunk).
-//
-// New logic uses "Structure of Arrays". We allocate ONE massive buffer (`data_arena`)
-// per chunk. All IDs, sequences, and quality scores are copied into this contiguous memory.
-// We track individual reads using integer `offsets`.
 #[derive(Eq, PartialEq)]
-struct SmartChunk {
+struct SequenceChunk {
     id: u32,
-    // The massive buffer holding all bytes for this chunk (IDs, Seqs, Quals)
     data_arena: Vec<u8>,
-    // Metadata for each read: (id_start, id_len, seq_start, seq_len, qual_start, qual_len)
     offsets: Vec<(u32, u32, u32, u32, u32, u32)>,
-    // Results of k-mer filtering. Filled by Rayon.
     matches: Vec<bool>,
 }
 
 // Implement Ord for BinaryHeap to support Ordered Output
-impl Ord for SmartChunk {
+impl Ord for SequenceChunk {
     fn cmp(&self, other: &Self) -> Ordering {
-        // Reverse comparison because BinaryHeap is a Max-Heap, 
-        // but we want the smallest Chunk ID (0, 1, 2...) to be popped first.
         other.id.cmp(&self.id) 
     }
 }
 
-impl PartialOrd for SmartChunk {
+impl PartialOrd for SequenceChunk {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
-// --- End SmartChunk ---
 
 pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
     let available_threads = num_cpus::get();
@@ -273,12 +260,9 @@ fn process_reads(
 ) -> Result<(u32, u32, u32, u32), Box<dyn Error + Send + Sync>> {
     let processor = Arc::new(processor);
 
-    // --- FIX: Bounded Channel with SmartChunk ---
-    // Capacity 20 chunks * ~4MB per chunk = ~80MB max buffer.
-    // Backpressure ensures we don't outrun the writer.
     let (chunk_sender, chunk_receiver): (
-        SyncSender<SmartChunk>,
-        Receiver<SmartChunk>,
+        SyncSender<SequenceChunk>,
+        Receiver<SequenceChunk>,
     ) = sync_channel(20);
 
     let chunk_idx = Arc::new(AtomicU32::new(0));
@@ -296,8 +280,6 @@ fn process_reads(
     let parallel_sender = chunk_sender.clone();
     let parellel_chunk_idx = chunk_idx.clone();
     
-    // --- WORKER THREAD (Producer / Arena Packer) ---
-    // This thread reads files, packs bytes into the arena, and dispatches to Rayon.
     let worker_thread = thread::spawn(move || -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut reader = if reads_path == "stdin" || reads_path.starts_with("stdin.") {
             needletail::parse_fastx_reader(io::stdin())
@@ -306,8 +288,6 @@ fn process_reads(
         }?;
 
         const CHUNK_SIZE: usize = 10_000;
-        // Pre-allocate arena size estimate: 10k reads * ~400 bytes/read = 4MB
-        // This is the key optimization: Re-using this memory instead of calling malloc.
         const ARENA_CAPACITY: usize = CHUNK_SIZE * 400; 
 
         // Current chunk state
@@ -332,7 +312,7 @@ fn process_reads(
                     })
                     .collect();
 
-                let chunk = SmartChunk {
+                let chunk = SequenceChunk {
                     id: current_chunk_idx,
                     data_arena: local_arena,
                     offsets: local_offsets,
@@ -405,7 +385,6 @@ fn process_reads(
     // Close channel from this side so receiver knows when to stop
     drop(chunk_sender);
 
-    // --- WRITER SETUP (Consumer) ---
     let mut matched_writer: BufWriter<File> = BufWriter::new(File::create(matched_path)?);
     let mut unmatched_writer: BufWriter<File> = BufWriter::with_capacity(4_000_000, File::create(unmatched_path)?);
 
@@ -422,9 +401,9 @@ fn process_reads(
     let unmatched_count = Arc::new(AtomicU32::new(0));
     let unmatched_bases = Arc::new(AtomicU32::new(0));
 
-    // Shared Writer Function: Writes a SmartChunk to disk
+    // Shared Writer Function: Writes a SequenceChunk to disk
     // This closure abstracts the logic of reconstructing reads from the arena.
-    let mut write_chunk_logic = |chunk: &SmartChunk| -> Result<(), Box<dyn Send + Sync + Error>> {
+    let mut write_chunk_logic = |chunk: &SequenceChunk| -> Result<(), Box<dyn Send + Sync + Error>> {
         let arena = &chunk.data_arena;
         let offsets = &chunk.offsets;
         let matches = &chunk.matches;
@@ -481,9 +460,8 @@ fn process_reads(
         Ok(())
     };
 
-    // --- MAIN CONSUMER LOOP ---
     if ordered_output {
-        let mut out_of_order_buffer: BinaryHeap<SmartChunk> = BinaryHeap::new();
+        let mut out_of_order_buffer: BinaryHeap<SequenceChunk> = BinaryHeap::new();
         let mut next_chunk_id = 0;
         const MAX_BUFFERED_CHUNKS: usize = 1000;
 
@@ -504,7 +482,7 @@ fn process_reads(
                     }
                 }
             } else {
-                // Sad path: chunk arrived early
+                // If chunk arrives early, buffer it
                 out_of_order_buffer.push(chunk);
                 if out_of_order_buffer.len() > MAX_BUFFERED_CHUNKS {
                     return Err(Box::from("Too many out-of-order chunks buffered."));
