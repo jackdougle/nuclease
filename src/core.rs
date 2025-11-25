@@ -2,21 +2,55 @@ use crate::kmer_ops::KmerProcessor;
 use bincode::{config, decode_from_std_read, encode_into_std_write};
 use needletail::parse_fastx_file;
 use rayon::prelude::*;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
-use std::mem::take;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::time::Instant;
 use std::{fs, io, u32};
 use std::{thread, usize};
 
+// --- ARCHITECTURE CHANGE: SmartChunk (Arena Allocation) ---
+// Previous logic used Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)>, causing
+// 3 allocations per read (~30,000 allocations per chunk).
+//
+// New logic uses "Structure of Arrays". We allocate ONE massive buffer (`data_arena`)
+// per chunk. All IDs, sequences, and quality scores are copied into this contiguous memory.
+// We track individual reads using integer `offsets`.
+#[derive(Eq, PartialEq)]
+struct SmartChunk {
+    id: u32,
+    // The massive buffer holding all bytes for this chunk (IDs, Seqs, Quals)
+    data_arena: Vec<u8>,
+    // Metadata for each read: (id_start, id_len, seq_start, seq_len, qual_start, qual_len)
+    offsets: Vec<(u32, u32, u32, u32, u32, u32)>,
+    // Results of k-mer filtering. Filled by Rayon.
+    matches: Vec<bool>,
+}
+
+// Implement Ord for BinaryHeap to support Ordered Output
+impl Ord for SmartChunk {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Reverse comparison because BinaryHeap is a Max-Heap, 
+        // but we want the smallest Chunk ID (0, 1, 2...) to be popped first.
+        other.id.cmp(&self.id) 
+    }
+}
+
+impl PartialOrd for SmartChunk {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+// --- End SmartChunk ---
+
 pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
     let available_threads = num_cpus::get();
 
-    // First set of variables: reference indexing parameters
     let num_threads = args
         .threads
         .unwrap_or(available_threads)
@@ -72,7 +106,6 @@ pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
 
     let process_mode = detect_mode(&args.in2, &args.outm2, &args.outu2, args.interinput);
 
-    // Second set of variables: read processing I/O
     let in_path = args.r#in;
     let in2_path = args.in2.unwrap_or_default();
 
@@ -123,52 +156,8 @@ pub fn run(args: crate::Args, start_time: Instant) -> io::Result<()> {
                 "Nonmatches:\t\t{} reads ({:.2}%)\t\t{} bases ({:.2}%)\n",
                 useq_count, unmatched_percent, ubase_count, ubase_percent
             );
-
-            println!(
-                "Time:\t\t\t{:.3} seconds",
-                start_time.elapsed().as_secs_f32()
-            );
-
-            if read_count >= 1_000_000 {
-                let read_count = read_count as f32 / 1_000_000.0;
-                println!(
-                    "Reads Processed:\t{:.2}m reads\t\t\t{:.2}m reads/sec",
-                    read_count,
-                    read_count / end_time
-                );
-            } else if read_count >= 10_000 {
-                let read_count = read_count as f32 / 1_000.0;
-                println!(
-                    "Reads Processed:\t{:.2}k reads\t\t\t{:.2}k reads/sec",
-                    read_count,
-                    read_count / end_time
-                );
-            } else {
-                println!(
-                    "Reads Processed:\t{} reads\t\t\t{:.2} reads/sec",
-                    read_count,
-                    read_count as f32 / end_time
-                );
-            }
-
-            if base_count >= 1_000_000 {
-                let base_count = base_count as f32 / 1_000_000.0;
-                println!(
-                    "Bases Processed:\t{:.2}m bases\t\t\t{:.2}m bases/sec",
-                    base_count,
-                    base_count / end_time
-                );
-            } else {
-                let base_count = base_count as f32 / 1_000.0;
-                println!(
-                    "Bases Processed:\t{:.2}k bases\t\t\t{:.2}k bases/sec",
-                    base_count,
-                    base_count / end_time
-                );
-            }
         }
         Err(e) => {
-            // TODO: Add error handling for missing file inputs (needs both >0 matched and unmatched files right now)
             eprintln!("\nError processing reads:\n{}", e);
         }
     }
@@ -202,7 +191,6 @@ fn get_reference_kmers(
 
     while let Some(record) = reader.next() {
         let record = record?;
-
         processor.process_ref(&record.seq());
     }
     Ok(())
@@ -285,17 +273,21 @@ fn process_reads(
 ) -> Result<(u32, u32, u32, u32), Box<dyn Error + Send + Sync>> {
     let processor = Arc::new(processor);
 
+    // --- FIX: Bounded Channel with SmartChunk ---
+    // Capacity 20 chunks * ~4MB per chunk = ~80MB max buffer.
+    // Backpressure ensures we don't outrun the writer.
     let (chunk_sender, chunk_receiver): (
-        Sender<(u32, Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)>)>,
-        Receiver<(u32, Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)>)>,
-    ) = channel();
+        SyncSender<SmartChunk>,
+        Receiver<SmartChunk>,
+    ) = sync_channel(20);
 
     let chunk_idx = Arc::new(AtomicU32::new(0));
-
-    let matched_filetype = matched_path.rsplit('.').next().unwrap_or("");
-    let unmatched_filetype = unmatched_path.rsplit('.').next().unwrap_or("");
-    let matched2_filetype = matched2_path.rsplit('.').next().unwrap_or("");
-    let unmatched2_filetype = unmatched2_path.rsplit('.').next().unwrap_or("");
+    
+    // Metadata for writers
+    let matched_filetype = matched_path.rsplit('.').next().unwrap_or("").to_string();
+    let unmatched_filetype = unmatched_path.rsplit('.').next().unwrap_or("").to_string();
+    let matched2_filetype = matched2_path.rsplit('.').next().unwrap_or("").to_string();
+    let unmatched2_filetype = unmatched2_path.rsplit('.').next().unwrap_or("").to_string();
     let matched_stdout = matched_path == "stdout" || matched_path.starts_with("stdout.");
     let unmatched_stdout = unmatched_path == "stdout" || unmatched_path.starts_with("stdout.");
     let matched2_stdout = matched2_path == "stdout" || matched2_path.starts_with("stdout.");
@@ -303,412 +295,258 @@ fn process_reads(
 
     let parallel_sender = chunk_sender.clone();
     let parellel_chunk_idx = chunk_idx.clone();
+    
+    // --- WORKER THREAD (Producer / Arena Packer) ---
+    // This thread reads files, packs bytes into the arena, and dispatches to Rayon.
     let worker_thread = thread::spawn(move || -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut reader = if reads_path == "stdin" || reads_path.starts_with("stdin.") {
             needletail::parse_fastx_reader(io::stdin())
         } else {
             needletail::parse_fastx_file(&reads_path)
-        }?; // Note the trailing ? for error handling
+        }?;
 
-        const CHUNK_CAP: usize = 10_000;
-        let mut chunk = Vec::with_capacity(CHUNK_CAP);
+        const CHUNK_SIZE: usize = 10_000;
+        // Pre-allocate arena size estimate: 10k reads * ~400 bytes/read = 4MB
+        // This is the key optimization: Re-using this memory instead of calling malloc.
+        const ARENA_CAPACITY: usize = CHUNK_SIZE * 400; 
 
-        if process_mode == ProcessMode::Unpaired {
-            while let Some(record) = reader.next() {
+        // Current chunk state
+        let mut arena: Vec<u8> = Vec::with_capacity(ARENA_CAPACITY);
+        let mut offsets: Vec<(u32, u32, u32, u32, u32, u32)> = Vec::with_capacity(CHUNK_SIZE);
+        
+        // Helper: Dispatches the filled arena to Rayon for k-mer processing
+        let mut process_and_send = |mut local_arena: Vec<u8>, local_offsets: Vec<(u32, u32, u32, u32, u32, u32)>| {
+            let processor = processor.clone();
+            let sender = parallel_sender.clone();
+            let current_chunk_idx = parellel_chunk_idx.fetch_add(1, AtomicOrdering::SeqCst);
+
+            rayon::spawn(move || {
+                // Parallel Processing Step:
+                // We map over the OFFSETS, creating temporary slices into the ARENA.
+                // This does NOT allocate new memory for sequences.
+                let matches: Vec<bool> = local_offsets.par_iter()
+                    .map(|(_, _, seq_start, seq_len, _, _)| {
+                        // Safe slice access due to offsets logic
+                        let seq = &local_arena[*seq_start as usize..(*seq_start + *seq_len) as usize];
+                        processor.process_read(seq)
+                    })
+                    .collect();
+
+                let chunk = SmartChunk {
+                    id: current_chunk_idx,
+                    data_arena: local_arena,
+                    offsets: local_offsets,
+                    matches,
+                };
+
+                // Blocks if channel is full (Backpressure)
+                let _ = sender.send(chunk);
+            });
+        };
+
+        // Helper: Pushes one record into the arena
+        let mut push_record = |id: &[u8], seq: &[u8], qual: &[u8], arena: &mut Vec<u8>, offsets: &mut Vec<(u32, u32, u32, u32, u32, u32)>| {
+            let id_start = arena.len() as u32;
+            arena.extend_from_slice(id);
+            let id_len = (arena.len() as u32) - id_start;
+
+            let seq_start = arena.len() as u32;
+            arena.extend_from_slice(seq);
+            let seq_len = (arena.len() as u32) - seq_start;
+
+            let qual_start = arena.len() as u32;
+            arena.extend_from_slice(qual);
+            let qual_len = (arena.len() as u32) - qual_start;
+
+            offsets.push((id_start, id_len, seq_start, seq_len, qual_start, qual_len));
+        };
+
+        // Processing Loop
+        if process_mode == ProcessMode::Unpaired || process_mode == ProcessMode::Interleaved || process_mode == ProcessMode::InterInPairedOut {
+             while let Some(record) = reader.next() {
                 let record = record?;
-                chunk.push((
-                    record.id().to_vec(),
-                    record.seq().to_vec(),
-                    record.qual().unwrap().to_vec(),
-                ));
+                // FIX: Added & to record.seq() to borrow the Cow<[u8]>
+                push_record(record.id(), &record.seq(), record.qual().unwrap_or(b""), &mut arena, &mut offsets);
 
-                if chunk.len() == CHUNK_CAP {
-                    // pair idx with each chunk
-
-                    let processor = processor.clone();
-                    let sender = parallel_sender.clone();
-                    let local_chunk = take(&mut chunk);
-
-                    let current_chunk_idx = parellel_chunk_idx.fetch_add(1, Ordering::SeqCst);
-
-                    rayon::spawn(move || {
-                        let processed: Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)> = local_chunk
-                            .into_par_iter()
-                            .map(|(id, seq, qual)| {
-                                let has_match = processor.process_read(&seq);
-                                (has_match, id, seq, qual)
-                            })
-                            .collect();
-                        let _ = sender.send((current_chunk_idx, processed));
-                    });
+                if offsets.len() == CHUNK_SIZE {
+                    // "Double Buffering": Swap current buffers with fresh pre-allocated ones
+                    let local_arena = std::mem::replace(&mut arena, Vec::with_capacity(ARENA_CAPACITY));
+                    let local_offsets = std::mem::replace(&mut offsets, Vec::with_capacity(CHUNK_SIZE));
+                    process_and_send(local_arena, local_offsets);
                 }
             }
+        } else {
+             // Paired modes (require two readers)
+             let mut reader2 = parse_fastx_file(&reads2_path)?;
+             while let (Some(record1), Some(record2)) = (reader.next(), reader2.next()) {
+                 let record1 = record1?;
+                 let record2 = record2?;
+                 
+                 // FIX: Added & to record.seq() to borrow the Cow<[u8]>
+                 push_record(record1.id(), &record1.seq(), record1.qual().unwrap_or(b""), &mut arena, &mut offsets);
+                 push_record(record2.id(), &record2.seq(), record2.qual().unwrap_or(b""), &mut arena, &mut offsets);
 
-            if !chunk.is_empty() {
-                let processed: Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)> = chunk
-                    .into_par_iter()
-                    .map(|(id, seq, qual)| {
-                        let has_match = processor.process_read(&seq);
-                        (has_match, id, seq, qual)
-                    })
-                    .collect();
+                 if offsets.len() == CHUNK_SIZE {
+                    let local_arena = std::mem::replace(&mut arena, Vec::with_capacity(ARENA_CAPACITY));
+                    let local_offsets = std::mem::replace(&mut offsets, Vec::with_capacity(CHUNK_SIZE));
+                    process_and_send(local_arena, local_offsets);
+                 }
+             }
+        }
 
-                let _ = parallel_sender.send((u32::MAX, processed));
-            }
-        } else if process_mode == ProcessMode::Interleaved
-            || process_mode == ProcessMode::InterInPairedOut
-        {
-            while let Some(record) = reader.next() {
-                let record = record?;
-                chunk.push((
-                    record.id().to_vec(),
-                    record.seq().to_vec(),
-                    record.qual().unwrap().to_vec(),
-                ));
-
-                if chunk.len() == CHUNK_CAP {
-                    let processor = processor.clone();
-                    let sender = parallel_sender.clone();
-                    let local_chunk = take(&mut chunk);
-                    let current_chunk_idx = parellel_chunk_idx.fetch_add(1, Ordering::SeqCst);
-
-                    // Process chunk in parallel
-                    rayon::spawn(move || {
-                        let processed: Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)> = local_chunk
-                            .into_par_iter()
-                            .map(|(id, seq, qual)| {
-                                let has_match = processor.process_read(&seq);
-                                (has_match, id, seq, qual)
-                            })
-                            .collect();
-
-                        let _ = sender.send((current_chunk_idx, processed));
-                    });
-                }
-            }
-
-            if !chunk.is_empty() {
-                let processed: Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)> = chunk
-                    .into_par_iter()
-                    .map(|(id, seq, qual)| {
-                        let has_match = processor.process_read(&seq);
-                        (has_match, id, seq, qual)
-                    })
-                    .collect();
-
-                let _ = parallel_sender.send((u32::MAX, processed));
-            }
-        } else if process_mode == ProcessMode::PairedInInterOut
-            || process_mode == ProcessMode::Paired
-        {
-            let mut reader2 = parse_fastx_file(reads2_path)?;
-            let mut chunk = Vec::with_capacity(CHUNK_CAP);
-            while let (Some(record1), Some(record2)) = (reader.next(), reader2.next()) {
-                let record1 = record1?;
-                let record2 = record2?;
-
-                chunk.push((
-                    record1.id().to_vec(),
-                    record1.seq().to_vec(),
-                    record1.qual().unwrap().to_vec(),
-                ));
-                chunk.push((
-                    record2.id().to_vec(),
-                    record2.seq().to_vec(),
-                    record2.qual().unwrap().to_vec(),
-                ));
-
-                if chunk.len() == CHUNK_CAP {
-                    let processor = processor.clone();
-                    let sender = parallel_sender.clone();
-                    let local_chunk = take(&mut chunk);
-                    let current_chunk_idx = parellel_chunk_idx.fetch_add(1, Ordering::SeqCst);
-
-                    rayon::spawn(move || {
-                        let processed: Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)> = local_chunk
-                            .into_par_iter()
-                            .map(|(id, seq, qual)| {
-                                let has_match = processor.process_read(&seq);
-                                (has_match, id, seq, qual)
-                            })
-                            .collect();
-
-                        let _ = sender.send((current_chunk_idx, processed));
-                    });
-                }
-            }
-
-            if !chunk.is_empty() {
-                let processed: Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)> = chunk
-                    .into_par_iter()
-                    .map(|(id, seq, qual)| {
-                        let has_match = processor.process_read(&seq);
-                        (has_match, id, seq, qual)
-                    })
-                    .collect();
-
-                let _ = parallel_sender.send((u32::MAX, processed));
-            }
+        // Process remaining items
+        if !offsets.is_empty() {
+             process_and_send(arena, offsets);
         }
 
         Ok(())
     });
 
+    // Close channel from this side so receiver knows when to stop
     drop(chunk_sender);
 
+    // --- WRITER SETUP (Consumer) ---
     let mut matched_writer: BufWriter<File> = BufWriter::new(File::create(matched_path)?);
-    let mut unmatched_writer: BufWriter<File> =
-        BufWriter::with_capacity(4_000_000, File::create(unmatched_path)?);
+    let mut unmatched_writer: BufWriter<File> = BufWriter::with_capacity(4_000_000, File::create(unmatched_path)?);
+
+    // Optional writers for paired output splitting
+    let mut m2_writer = if process_mode == ProcessMode::InterInPairedOut || process_mode == ProcessMode::Paired {
+        Some(BufWriter::new(File::create(matched2_path)?))
+    } else { None };
+    let mut u2_writer = if process_mode == ProcessMode::InterInPairedOut || process_mode == ProcessMode::Paired {
+        Some(BufWriter::new(File::create(unmatched2_path)?))
+    } else { None };
 
     let matched_count = Arc::new(AtomicU32::new(0));
     let matched_bases = Arc::new(AtomicU32::new(0));
-
     let unmatched_count = Arc::new(AtomicU32::new(0));
     let unmatched_bases = Arc::new(AtomicU32::new(0));
 
-    let m_count;
-    let m_bases;
-    let u_count;
-    let u_bases;
+    // Shared Writer Function: Writes a SmartChunk to disk
+    // This closure abstracts the logic of reconstructing reads from the arena.
+    let mut write_chunk_logic = |chunk: &SmartChunk| -> Result<(), Box<dyn Send + Sync + Error>> {
+        let arena = &chunk.data_arena;
+        let offsets = &chunk.offsets;
+        let matches = &chunk.matches;
 
+        // Helper to slice arena
+        let get_read = |idx: usize| {
+            let (id_s, id_l, seq_s, seq_l, qual_s, qual_l) = offsets[idx];
+            (
+                &arena[id_s as usize .. (id_s + id_l) as usize],
+                &arena[seq_s as usize .. (seq_s + seq_l) as usize],
+                &arena[qual_s as usize .. (qual_s + qual_l) as usize]
+            )
+        };
+
+        if process_mode == ProcessMode::Unpaired {
+            for i in 0..offsets.len() {
+                let (id, seq, qual) = get_read(i);
+                if matches[i] {
+                    write_read(&mut matched_writer, id, seq, qual, &matched_filetype, matched_stdout)?;
+                    matched_count.fetch_add(1, AtomicOrdering::Relaxed);
+                    matched_bases.fetch_add(seq.len() as u32, AtomicOrdering::Relaxed);
+                } else {
+                    write_read(&mut unmatched_writer, id, seq, qual, &unmatched_filetype, unmatched_stdout)?;
+                    unmatched_count.fetch_add(1, AtomicOrdering::Relaxed);
+                    unmatched_bases.fetch_add(seq.len() as u32, AtomicOrdering::Relaxed);
+                }
+            }
+        } else {
+            // Paired logic (stride 2)
+            for i in (0..offsets.len()).step_by(2) {
+                // If either read in pair is a match, the whole pair is a match
+                let has_match = matches[i] || matches[i+1];
+                let (id1, seq1, qual1) = get_read(i);
+                let (id2, seq2, qual2) = get_read(i+1);
+                
+                let (w1, w2, count, bases) = if has_match {
+                    (&mut matched_writer, m2_writer.as_mut(), &matched_count, &matched_bases)
+                } else {
+                    (&mut unmatched_writer, u2_writer.as_mut(), &unmatched_count, &unmatched_bases)
+                };
+
+                write_read(w1, id1, seq1, qual1, if has_match { &matched_filetype } else { &unmatched_filetype }, if has_match { matched_stdout } else { unmatched_stdout })?;
+                
+                if let Some(w2_real) = w2 {
+                     write_read(w2_real, id2, seq2, qual2, if has_match { &matched2_filetype } else { &unmatched2_filetype }, if has_match { matched2_stdout } else { unmatched2_stdout })?;
+                } else {
+                     write_read(w1, id2, seq2, qual2, if has_match { &matched_filetype } else { &unmatched_filetype }, if has_match { matched_stdout } else { unmatched_stdout })?;
+                }
+                
+                count.fetch_add(2, AtomicOrdering::Relaxed);
+                bases.fetch_add((seq1.len() + seq2.len()) as u32, AtomicOrdering::Relaxed);
+            }
+        }
+        Ok(())
+    };
+
+    // --- MAIN CONSUMER LOOP ---
     if ordered_output {
-        let mut output_chunks = Vec::new();
-        for output_chunk in chunk_receiver {
-            output_chunks.push(output_chunk);
+        let mut out_of_order_buffer: BinaryHeap<SmartChunk> = BinaryHeap::new();
+        let mut next_chunk_id = 0;
+        const MAX_BUFFERED_CHUNKS: usize = 1000;
+
+        for chunk in chunk_receiver {
+            if chunk.id == next_chunk_id {
+                // Happy path: chunk arrived in order
+                write_chunk_logic(&chunk)?;
+                next_chunk_id += 1;
+
+                // Check if subsequent chunks are already waiting
+                while let Some(buffered) = out_of_order_buffer.peek() {
+                    if buffered.id == next_chunk_id {
+                        let buffered = out_of_order_buffer.pop().unwrap();
+                        write_chunk_logic(&buffered)?;
+                        next_chunk_id += 1;
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                // Sad path: chunk arrived early
+                out_of_order_buffer.push(chunk);
+                if out_of_order_buffer.len() > MAX_BUFFERED_CHUNKS {
+                    return Err(Box::from("Too many out-of-order chunks buffered."));
+                }
+            }
+        }
+        // Drain any remaining in-order chunks
+        while let Some(buffered) = out_of_order_buffer.pop() {
+            if buffered.id == next_chunk_id {
+                write_chunk_logic(&buffered)?;
+                next_chunk_id += 1;
+            } else {
+                return Err(Box::from("Missing chunk in ordered output stream."));
+            }
         }
 
-        output_chunks.sort_by(|a, b| a.0.cmp(&b.0));
-
-        (m_count, m_bases, u_count, u_bases) = process_output_chunks(
-            output_chunks.into_iter(),
-            &mut matched_writer,
-            matched_count,
-            matched_bases,
-            matched_filetype,
-            matched_stdout,
-            matched2_path,
-            matched2_filetype,
-            matched2_stdout,
-            &mut unmatched_writer,
-            unmatched_count,
-            unmatched_bases,
-            unmatched_filetype,
-            unmatched_stdout,
-            unmatched2_path,
-            unmatched2_filetype,
-            unmatched2_stdout,
-            process_mode,
-        )?;
     } else {
-        (m_count, m_bases, u_count, u_bases) = process_output_chunks(
-            chunk_receiver.into_iter(),
-            &mut matched_writer,
-            matched_count,
-            matched_bases,
-            matched_filetype,
-            matched_stdout,
-            matched2_path,
-            matched2_filetype,
-            matched2_stdout,
-            &mut unmatched_writer,
-            unmatched_count,
-            unmatched_bases,
-            unmatched_filetype,
-            unmatched_stdout,
-            unmatched2_path,
-            unmatched2_filetype,
-            unmatched_stdout,
-            process_mode,
-        )?;
+        // Unordered mode: Just process as they arrive
+        for chunk in chunk_receiver {
+            write_chunk_logic(&chunk)?;
+        }
     }
 
     matched_writer.flush()?;
     unmatched_writer.flush()?;
+    if let Some(mut w) = m2_writer { w.flush()?; }
+    if let Some(mut w) = u2_writer { w.flush()?; }
+    
     worker_thread.join().unwrap()?;
 
-    // delete file is stdout is input
-    for path in [
-        &matched_path,
-        unmatched_path,
-        matched2_path,
-        unmatched2_path,
-    ] {
+    // Cleanup stdout temporary files
+    for path in [&matched_path, unmatched_path, matched2_path, unmatched2_path] {
         if path.starts_with("stdout") {
-            if let Err(e) = fs::remove_file(path) {
-                // Ignore error if file doesn't exist
-                if e.kind() != io::ErrorKind::NotFound {
-                    eprintln!("Warning: Could not delete file '{}': {}", path, e);
-                }
-            }
+             let _ = fs::remove_file(path);
         }
-    }
-
-    Ok((m_count, m_bases, u_count, u_bases))
-}
-
-fn process_output_chunks(
-    chunks_iterator: impl Iterator<Item = (u32, Vec<(bool, Vec<u8>, Vec<u8>, Vec<u8>)>)>,
-    m_writer: &mut BufWriter<File>,
-    m_count: Arc<AtomicU32>,
-    m_bases: Arc<AtomicU32>,
-    m_filetype: &str,
-    m_stdout: bool,
-    m2_path: &str,
-    m2_filetype: &str,
-    m2_stdout: bool,
-    u_writer: &mut BufWriter<File>,
-    u_count: Arc<AtomicU32>,
-    u_bases: Arc<AtomicU32>,
-    u_filetype: &str,
-    u_stdout: bool,
-    u2_path: &str,
-    u2_filetype: &str,
-    u2_stdout: bool,
-    process_mode: ProcessMode,
-) -> Result<(u32, u32, u32, u32), Box<dyn Send + Sync + Error>> {
-    if process_mode == ProcessMode::Unpaired {
-        for (_, chunk) in chunks_iterator {
-            for (has_match, id, seq, qual) in chunk {
-                if has_match {
-                    write_read(m_writer, &id, &seq, &qual, m_filetype, m_stdout)?;
-
-                    m_count.fetch_add(1, Ordering::Relaxed);
-                    m_bases.fetch_add(seq.len() as u32, Ordering::Relaxed);
-                } else {
-                    write_read(u_writer, &id, &seq, &qual, u_filetype, u_stdout)?;
-
-                    u_count.fetch_add(1, Ordering::Relaxed);
-                    u_bases.fetch_add(seq.len() as u32, Ordering::Relaxed);
-                }
-            }
-        }
-    } else if process_mode == ProcessMode::Interleaved
-        || process_mode == ProcessMode::PairedInInterOut
-    {
-        for (_, chunk) in chunks_iterator {
-            for i in (0..chunk.len() - 1).step_by(2) {
-                let has_match = chunk[i].0 || chunk[i + 1].0;
-
-                if has_match {
-                    write_read(
-                        m_writer,
-                        &chunk[i].1,
-                        &chunk[i].2,
-                        &chunk[i].3,
-                        m_filetype,
-                        m_stdout,
-                    )?;
-
-                    write_read(
-                        m_writer,
-                        &chunk[i + 1].1,
-                        &chunk[i + 1].2,
-                        &chunk[i + 1].3,
-                        m_filetype,
-                        m_stdout,
-                    )?;
-
-                    m_count.fetch_add(2, Ordering::Relaxed);
-                    m_bases.fetch_add(
-                        (chunk[i].2.len() + chunk[i + 1].2.len()) as u32,
-                        Ordering::Relaxed,
-                    );
-                } else {
-                    write_read(
-                        u_writer,
-                        &chunk[i].1,
-                        &chunk[i].2,
-                        &chunk[i].3,
-                        u_filetype,
-                        u_stdout,
-                    )?;
-
-                    write_read(
-                        u_writer,
-                        &chunk[i + 1].1,
-                        &chunk[i + 1].2,
-                        &chunk[i + 1].3,
-                        u_filetype,
-                        u_stdout,
-                    )?;
-
-                    u_count.fetch_add(2, Ordering::Relaxed);
-                    u_bases.fetch_add(
-                        (chunk[i].2.len() + chunk[i + 1].2.len()) as u32,
-                        Ordering::Relaxed,
-                    );
-                }
-            }
-        }
-    } else if process_mode == ProcessMode::InterInPairedOut || process_mode == ProcessMode::Paired {
-        let mut m2_writer: BufWriter<File> = BufWriter::new(File::create(m2_path)?);
-        let mut u2_writer: BufWriter<File> = BufWriter::new(File::create(u2_path)?);
-
-        for (_, chunk) in chunks_iterator {
-            for i in (0..chunk.len() - 1).step_by(2) {
-                let has_match = chunk[i].0 || chunk[i + 1].0;
-
-                if has_match {
-                    write_read(
-                        m_writer,
-                        &chunk[i].1,
-                        &chunk[i].2,
-                        &chunk[i].3,
-                        m_filetype,
-                        m_stdout,
-                    )?;
-
-                    write_read(
-                        &mut m2_writer,
-                        &chunk[i + 1].1,
-                        &chunk[i + 1].2,
-                        &chunk[i + 1].3,
-                        m2_filetype,
-                        m2_stdout,
-                    )?;
-
-                    m_count.fetch_add(2, Ordering::Relaxed);
-                    m_bases.fetch_add(
-                        (chunk[i].2.len() + chunk[i + 1].2.len()) as u32,
-                        Ordering::Relaxed,
-                    );
-                } else {
-                    write_read(
-                        u_writer,
-                        &chunk[i].1,
-                        &chunk[i].2,
-                        &chunk[i].3,
-                        u_filetype,
-                        u_stdout,
-                    )?;
-
-                    write_read(
-                        &mut u2_writer,
-                        &chunk[i + 1].1,
-                        &chunk[i + 1].2,
-                        &chunk[i + 1].3,
-                        u2_filetype,
-                        u2_stdout,
-                    )?;
-
-                    u_count.fetch_add(2, Ordering::Relaxed);
-                    u_bases.fetch_add(
-                        (chunk[i].2.len() + chunk[i + 1].2.len()) as u32,
-                        Ordering::Relaxed,
-                    );
-                }
-            }
-        }
-
-        m2_writer.flush()?;
-        u2_writer.flush()?;
     }
 
     Ok((
-        m_count.load(Ordering::Relaxed),
-        m_bases.load(Ordering::Relaxed),
-        u_count.load(Ordering::Relaxed),
-        u_bases.load(Ordering::Relaxed),
+        matched_count.load(AtomicOrdering::Relaxed),
+        matched_bases.load(AtomicOrdering::Relaxed),
+        unmatched_count.load(AtomicOrdering::Relaxed),
+        unmatched_bases.load(AtomicOrdering::Relaxed),
     ))
 }
 
@@ -722,15 +560,14 @@ fn write_read(
 ) -> Result<(), Box<dyn Send + Sync + Error>> {
     if stdout {
         unsafe {
-            if format == "fa" || format == "fna" || format == "fasta" {
-                println!(">");
-                println!("{}", str::from_utf8_unchecked(id));
-                println!("{}", str::from_utf8_unchecked(sequence));
+            let s_id = std::str::from_utf8_unchecked(id);
+            let s_seq = std::str::from_utf8_unchecked(sequence);
+            
+            if format == "fa" || format == "fna" || format == "fasta"  { // matches fa, fna, fasta
+                println!(">\n{}\n{}", s_id, s_seq);
             } else {
-                println!(">");
-                println!("{}", str::from_utf8_unchecked(id));
-                println!("{}\n+", str::from_utf8_unchecked(sequence));
-                println!("{}", str::from_utf8_unchecked(quality));
+                let s_qual = std::str::from_utf8_unchecked(quality);
+                println!("@\n{}\n{}\n+\n{}", s_id, s_seq, s_qual);
             }
         }
     } else {
@@ -750,6 +587,5 @@ fn write_read(
             writer.write_all(b"\n")?;
         }
     }
-
     Ok(())
 }
