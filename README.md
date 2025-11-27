@@ -56,9 +56,8 @@ brew tap jackdougle/nucleaze
 brew install nucleaze
 ```
 
-### **3. Run program with necessary parameters**
-Nucleaze requires at least `--in` and `--ref` to be provided.
-   - Providing both ref arguments is generally best for performance and redundance
+### **3. Run program with necessary arguments**
+Nucleaze requires `--in` and at least one of `--ref` or `--binref` to be provided.
 
 See more parameter documentation at **[./src/main.rs](/src/main.rs)**
 
@@ -153,4 +152,4 @@ This project is licensed under the MIT License, see [LICENSE](LICENSE) for detai
 
 ---
 
-#### Please email jack.gdouglass@gmail.com with any comments, questions, or to request new features.
+#### Please email jack.gdouglass@gmail.com with any questions or feature requests.
