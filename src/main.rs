@@ -47,8 +47,8 @@ OUTPUT PARAMETERS: use 'stdout.fa / stdout.fq to pipe to stdout'
 MEMORY & PERFORMANCE PARAMETERS
     --k 21              (-k) K-mer size (number of bases per k-mer). Ranges
                         from 1-31, larger k-mers will have less matches.
-    --minhits 1         Minimum number of k-mer matches a read sequence must
-                        have to be considered a match.
+    --minhits 1         (-h) Minimum number of k-mer matches a read sequence 
+                        must have to be considered a match.
     --threads auto      (-t) Number of threads to use for parallel processing.
                         Program will use all available threads by default.
     --maxmem auto       (-m) Maximum memory to use. Program will use ~50% of
