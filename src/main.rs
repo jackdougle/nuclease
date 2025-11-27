@@ -68,23 +68,23 @@ Contact jack.gdouglass@gmail.com for any questions or issues encountered.
 #[command(version, override_help = ABOUT)]
 struct Args {
     /// Amount of bases in a k-mer
-    #[arg(long)]
+    #[arg(short, long)]
     k: Option<usize>,
 
     /// Min number of k-mer hits to match a read
-    #[arg(long)]
+    #[arg(short = 'h', long)]
     minhits: Option<u8>,
 
     /// Max amount of threads to use
-    #[arg(long)]
+    #[arg(short, long)]
     threads: Option<usize>,
 
     /// Memory cap in human-readable format
-    #[arg(long)]
+    #[arg(short, long)]
     maxmem: Option<String>,
 
     /// FASTA/FASTQ path for reference sequences
-    #[arg(long)]
+    #[arg(short, long)]
     r#ref: Option<String>,
 
     /// FASTA/FASTQ path for read sequences
@@ -100,7 +100,7 @@ struct Args {
     saveref: Option<String>,
 
     /// Binary file containing serialized ref k-mers
-    #[arg(long)]
+    #[arg(short, long)]
     binref: Option<String>,
 
     /// Output file of matched reads
@@ -120,7 +120,7 @@ struct Args {
     outu2: Option<String>,
 
     /// Enabling flag signals interleaved input
-    #[arg(long)]
+    #[arg(short, long)]
     interinput: bool,
 
     /// Enabling flag causes ordered output
