@@ -190,12 +190,17 @@ fn get_reference_kmers(
     ref_path: &str,
     processor: &mut KmerProcessor,
 ) -> Result<(), Box<dyn Error>> {
-    let mut reader = parse_fastx_file(ref_path)?;
+    let ref_filename = ref_path.split(',');
+    for ref_path in ref_filename {
+        println!("Loading reference k-mers from {}", ref_path);
+        let mut reader = parse_fastx_file(ref_path)?;
 
-    while let Some(record) = reader.next() {
-        let record = record?;
-        processor.process_ref(&record.seq());
+        while let Some(record) = reader.next() {
+            let record = record?;
+            processor.process_ref(&record.seq());
+        }
     }
+    
     Ok(())
 }
 

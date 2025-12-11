@@ -4,10 +4,11 @@ mod kmer_ops;
 use clap::Parser;
 use std::io;
 use std::time::Instant;
+use rlimit::{Resource, setrlimit};
 
-const ABOUT: &str = "Nucleaze 1.2.0
+const ABOUT: &str = "Nucleaze 1.2.1
 Written by Jack Douglass
-Last modified October 25, 2025
+Last modified November 29, 2025
 
 Nucleaze compares DNA sequences from input file to DNA sequences from reference
  file using k-mer analysis. Splits up reference file sequences into k-mers of
@@ -51,16 +52,15 @@ MEMORY & PERFORMANCE PARAMETERS
                         have to be considered a match.
     --threads auto      (-t) Number of threads to use for parallel processing.
                         Program will use all available threads by default.
-    --maxmem auto       (-m) Maximum memory to use. Program will use ~50% of
-                        available memory by default. '--maxmem 5G' will specify
-                        5 gigabytes, '--maxmem 200M' will specify 200
-                        megabytes. Memory limiting is currently a WIP.
+    --maxmem auto       (-m) Maximum memory to use, in human readable format. 
+                        '--maxmem 5G' will specify 5 gigabytes, '--maxmem 200M'
+                        will specify 200 megabytes. No memory limit by default.
     --interinput        (-i) Enable flag to input as interleaved paired-end
                         reads, omit flag for unpaired reads.
     --order             (-o) Enable flag to get read outputs ordered by
                         sequence ID.
 
-Function and usage documentation at ./README.md
+Function and usage documentation at /README.md.
 Contact jack.gdouglass@gmail.com for any questions or issues encountered.
 ";
 
@@ -137,12 +137,56 @@ fn main() -> io::Result<()> {
     let user_args: Vec<String> = std::env::args().skip(1).collect();
     println!("Nucleaze {} [{}]", version, user_args.join(" "));
 
+    if let Some(maxmem_str) = &args.maxmem {
+        match parse_memory_size(maxmem_str) {
+            Ok(size_bytes) => {
+                let soft_limit = size_bytes;
+                let hard_limit = size_bytes;
+                println!("Setting memory limit to {} bytes", size_bytes);
+                if let Err(e) = setrlimit(Resource::AS, soft_limit, hard_limit) {
+                    eprintln!("Failed to set memory limit: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Err(e) => {
+                eprintln!("Could not parse --maxmem value: {}, exiting.", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
     validate_args(&args)?;
 
     core::run(args, start_time)?;
 
     Ok(())
 }
+
+fn parse_memory_size(input: &str) -> Result<u64, String> {
+    let s = input.trim();
+    let s_up = s.to_uppercase();
+
+    // Split into (number, suffix)
+    let (num_str, multiplier) = match s_up.strip_suffix('G') {
+        Some(n) => (n, 1024_u64.pow(3)),
+        None => match s_up.strip_suffix('M') {
+            Some(n) => (n, 1024_u64.pow(2)),
+            None => match s_up.strip_suffix('K') {
+                Some(n) => (n, 1024_u64),
+                None => match s_up.strip_suffix('B') {
+                    Some(n) => (n, 1),
+                    None => (s_up.as_str(), 1), // no unit
+                },
+            },
+        },
+    };
+
+    num_str
+        .parse::<u64>()
+        .map(|n| n * multiplier)
+        .map_err(|_| format!("Invalid size format: '{}'", input))
+}
+
 
 /// Validate command-line arguments to catch common errors early
 fn validate_args(args: &Args) -> io::Result<()> {
